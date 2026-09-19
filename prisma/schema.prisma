@@ -1,5 +1,8 @@
-// CantinaFast — schema.prisma inicial
-// Baseado no DER corrigido (21 entidades) e no PDF de Modelagem de Banco de Dados.
+// CantinaFast — schema PROVISÓRIO (versão reduzida do Murilo, ver CLAUDE.md)
+//
+// Reconstruído a partir da descrição do CLAUDE.md, não do arquivo original do Murilo.
+// Os valores dos enums TipoMovimentacaoEstoque, CanalPedido e StatusPedido e os tipos
+// exatos das colunas são suposições — substituir por este arquivo quando o Murilo enviar o real.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,14 +16,32 @@ datasource db {
 // ---------- Enums ----------
 
 enum PerfilUsuario {
-  ADMINISTRADOR
   ATENDENTE
   CAIXA
+  ADMINISTRADOR
 }
 
-enum OrigemPedido {
+enum TipoMovimentacaoEstoque {
+  ENTRADA
+  SAIDA
+  AJUSTE
+  VENDA
+  PERDA
+  RETORNO
+}
+
+enum CanalPedido {
   PRESENCIAL
   ONLINE
+}
+
+enum StatusPedido {
+  PENDENTE
+  CONFIRMADO
+  EM_PREPARO
+  PRONTO
+  ENTREGUE
+  CANCELADO
 }
 
 enum FormaPagamento {
@@ -39,391 +60,122 @@ enum StatusPagamento {
   ESTORNADO
 }
 
-enum StatusReserva {
-  ATIVA
-  CONVERTIDA
-  LIBERADA
-}
-
-enum TipoMovimentacao {
-  ENTRADA
-  SAIDA
-  AJUSTE
-  VENDA
-  PERDA
-  RETORNO
-}
-
-enum StatusSincronizacao {
-  PENDING
-  PROCESSING
-  SYNCED
-  ERROR
-}
-
-enum TipoDocumentoFiscal {
-  NFCE
-  NFE
-}
-
-enum StatusFiscal {
-  PENDENTE
-  AUTORIZADO
-  REJEITADO
-  CANCELADO
-}
-
-enum StatusBackup {
-  SUCESSO
-  ERRO
-}
-
-enum TipoEventoNotificacao {
-  PEDIDO_CONFIRMADO
-  PEDIDO_RECEBIDO
-  PRONTO_PARA_RETIRADA
-  PEDIDO_CANCELADO
-}
-
-enum StatusEnvioNotificacao {
-  PENDENTE
-  ENVIADA
-  FALHA
-}
-
 // ---------- Entidades ----------
 
 model Usuario {
-  id        BigInt   @id @default(autoincrement()) @map("id_usuario")
-  nome      String   @db.VarChar(120)
-  login     String   @unique @db.VarChar(120)
-  senhaHash String   @map("senha_hash") @db.VarChar(255)
+  id        Int           @id @default(autoincrement())
+  nome      String        @db.VarChar(120)
+  login     String        @unique @db.VarChar(120)
+  senhaHash String        @db.VarChar(255)
   perfil    PerfilUsuario
-  ativo     Boolean  @default(true)
+  ativo     Boolean       @default(true)
+  criadoEm  DateTime      @default(now())
 
-  pedidos          Pedido[]
-  fechamentosCaixa FechamentoCaixa[]
-  auditorias       Auditoria[]
-  despesas         Despesa[]
-  perdas           PerdaDesperdicio[]
-  movimentacoes    MovimentacaoEstoque[]
+  pedidos       Pedido[]
+  movimentacoes MovimentacaoEstoque[]
 
-  @@map("usuario")
-}
-
-model Cliente {
-  id         BigInt   @id @default(autoincrement()) @map("id_cliente")
-  nome       String   @db.VarChar(120)
-  telefone   String?  @db.VarChar(20)
-  email      String?  @unique @db.VarChar(160)
-  senhaHash  String?  @map("senha_hash") @db.VarChar(255)
-  loginGoogle String? @map("login_google") @db.VarChar(255)
-  ativo      Boolean  @default(true)
-
-  pedidos      Pedido[]
-  cartoes      CartaoToken[]
-
-  @@map("cliente")
+  @@map("usuarios")
 }
 
 model Categoria {
-  id    BigInt   @id @default(autoincrement()) @map("id_categoria")
-  nome  String   @db.VarChar(80)
-  ativo Boolean  @default(true)
+  id    Int     @id @default(autoincrement())
+  nome  String  @db.VarChar(80)
+  ativa Boolean @default(true)
 
   produtos Produto[]
 
-  @@map("categoria")
+  @@map("categorias")
 }
 
 model Produto {
-  id                    BigInt   @id @default(autoincrement()) @map("id_produto")
-  categoriaId           BigInt   @map("id_categoria")
-  nome                  String   @db.VarChar(140)
-  descricao             String?
-  precoVenda            Decimal  @map("preco_venda") @db.Decimal(12, 2)
-  custo                 Decimal? @db.Decimal(12, 2)
-  codigoBarras          String?  @unique @map("codigo_barras") @db.VarChar(80)
-  estoqueFisico         Decimal  @default(0) @map("estoque_fisico") @db.Decimal(12, 3)
-  estoqueMinimo         Decimal? @map("estoque_minimo") @db.Decimal(12, 3)
-  disponivelPresencial  Boolean  @default(true) @map("disponivel_presencial")
-  disponivelOnline      Boolean  @default(true) @map("disponivel_online")
-  ncm                   String?  @db.VarChar(20)
-  cfopPadrao            String?  @map("cfop_padrao") @db.VarChar(10)
-  ativo                 Boolean  @default(true)
+  id                   Int      @id @default(autoincrement())
+  categoriaId          Int
+  nome                 String   @db.VarChar(140)
+  descricao            String?
+  precoVenda           Decimal  @db.Decimal(12, 2)
+  codigoBarras         String?  @unique @db.VarChar(80)
+  imagemUrl            String?  @db.VarChar(500)
+  disponivelPresencial Boolean  @default(true)
+  disponivelOnline     Boolean  @default(true)
+  ativo                Boolean  @default(true)
+  criadoEm             DateTime @default(now())
 
-  categoria      Categoria              @relation(fields: [categoriaId], references: [id])
-  itensPedido    ItemPedido[]
-  reservas       ReservaEstoque[]
-  movimentacoes  MovimentacaoEstoque[]
-  perdas         PerdaDesperdicio[]
+  categoria     Categoria             @relation(fields: [categoriaId], references: [id])
+  estoque       Estoque?
+  movimentacoes MovimentacaoEstoque[]
+  itensPedido   ItemPedido[]
 
-  @@map("produto")
+  @@map("produtos")
 }
 
-model JanelaRetirada {
-  id                BigInt   @id @default(autoincrement()) @map("id_janela")
-  inicio            DateTime
-  fim               DateTime
-  capacidadeMaxima  Int      @map("capacidade_maxima")
-  bloqueada         Boolean  @default(false)
+model Estoque {
+  id                  Int @id @default(autoincrement())
+  produtoId           Int @unique
+  quantidadeFisica    Int @default(0)
+  quantidadeReservada Int @default(0)
+  estoqueMinimo       Int @default(0)
 
-  pedidos Pedido[]
+  produto Produto @relation(fields: [produtoId], references: [id])
 
-  @@map("janela_retirada")
+  @@map("estoque")
+}
+
+model MovimentacaoEstoque {
+  id         Int                     @id @default(autoincrement())
+  produtoId  Int
+  usuarioId  Int?
+  tipo       TipoMovimentacaoEstoque
+  quantidade Int
+  motivo     String?                 @db.VarChar(255)
+  criadoEm   DateTime                @default(now())
+
+  produto Produto  @relation(fields: [produtoId], references: [id])
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@map("movimentacoes_estoque")
 }
 
 model Pedido {
-  id                 BigInt       @id @default(autoincrement()) @map("id_pedido")
-  clienteId          BigInt?      @map("id_cliente")
-  usuarioId          BigInt?      @map("id_usuario")
-  janelaId           BigInt?      @map("id_janela")
-  origem             OrigemPedido
-  nomeContato        String?      @map("nome_contato") @db.VarChar(120)
-  telefoneContato    String?      @map("telefone_contato") @db.VarChar(20)
-  statusPedido       String       @map("status_pedido") @db.VarChar(30)
-  numeroRetirada     String?      @unique @map("numero_retirada") @db.VarChar(30)
-  total              Decimal      @db.Decimal(12, 2)
-  identificadorUnico String       @unique @default(uuid()) @map("identificador_unico") @db.Uuid
-  dataHora           DateTime     @default(now()) @map("data_hora")
+  id         Int          @id @default(autoincrement())
+  usuarioId  Int?
+  // Cliente ainda não está modelado (fora do escopo desta entrega): campo solto, sem @relation.
+  clienteId  Int?
+  canal      CanalPedido
+  status     StatusPedido @default(PENDENTE)
+  valorTotal Decimal      @db.Decimal(12, 2)
+  criadoEm   DateTime     @default(now())
 
-  cliente        Cliente?              @relation(fields: [clienteId], references: [id])
-  usuario        Usuario?              @relation(fields: [usuarioId], references: [id])
-  janela         JanelaRetirada?       @relation(fields: [janelaId], references: [id])
-  itens          ItemPedido[]
-  pagamentos     Pagamento[]
-  reservas       ReservaEstoque[]
-  movimentacoes  MovimentacaoEstoque[]
-  documentos     DocumentoFiscal[]
-  sincronizacoes Sincronizacao[]
-  notificacoes   Notificacao[]
+  usuario    Usuario?     @relation(fields: [usuarioId], references: [id])
+  itens      ItemPedido[]
+  pagamentos Pagamento[]
 
-  @@map("pedido")
+  @@map("pedidos")
 }
 
 model ItemPedido {
-  id            BigInt  @id @default(autoincrement()) @map("id_item_pedido")
-  pedidoId      BigInt  @map("id_pedido")
-  produtoId     BigInt  @map("id_produto")
-  quantidade    Decimal @db.Decimal(12, 3)
-  precoUnitario Decimal @map("preco_unitario") @db.Decimal(12, 2)
+  id            Int     @id @default(autoincrement())
+  pedidoId      Int
+  produtoId     Int
+  quantidade    Int
+  precoUnitario Decimal @db.Decimal(12, 2)
   subtotal      Decimal @db.Decimal(12, 2)
 
   pedido  Pedido  @relation(fields: [pedidoId], references: [id])
   produto Produto @relation(fields: [produtoId], references: [id])
 
-  @@map("item_pedido")
+  @@map("itens_pedido")
 }
 
 model Pagamento {
-  id                  BigInt          @id @default(autoincrement()) @map("id_pagamento")
-  pedidoId            BigInt          @map("id_pedido")
-  formaPagamento      FormaPagamento  @map("forma_pagamento")
-  statusPagamento     StatusPagamento @map("status_pagamento")
-  valor               Decimal         @db.Decimal(12, 2)
-  referenciaTransacao String?         @map("referencia_transacao") @db.VarChar(150)
-  dataHora            DateTime        @default(now()) @map("data_hora")
+  id                   Int             @id @default(autoincrement())
+  pedidoId             Int
+  formaPagamento       FormaPagamento
+  statusPagamento      StatusPagamento @default(PENDENTE)
+  valor                Decimal         @db.Decimal(12, 2)
+  identificadorExterno String?         @db.VarChar(150)
+  criadoEm             DateTime        @default(now())
 
   pedido Pedido @relation(fields: [pedidoId], references: [id])
 
-  @@map("pagamento")
-}
-
-model ReservaEstoque {
-  id           BigInt        @id @default(autoincrement()) @map("id_reserva")
-  pedidoId     BigInt        @map("id_pedido")
-  produtoId    BigInt        @map("id_produto")
-  quantidade   Decimal       @db.Decimal(12, 3)
-  expiraEm     DateTime      @map("expira_em")
-  statusReserva StatusReserva @map("status_reserva")
-
-  pedido  Pedido  @relation(fields: [pedidoId], references: [id])
-  produto Produto @relation(fields: [produtoId], references: [id])
-
-  @@map("reserva_estoque")
-}
-
-model MovimentacaoEstoque {
-  id         BigInt           @id @default(autoincrement()) @map("id_movimentacao")
-  produtoId  BigInt           @map("id_produto")
-  pedidoId   BigInt?          @map("id_pedido")
-  usuarioId  BigInt?          @map("id_usuario")
-  tipo       TipoMovimentacao
-  quantidade Decimal          @db.Decimal(12, 3)
-  motivo     String?          @db.VarChar(255)
-  dataHora   DateTime         @default(now()) @map("data_hora")
-
-  produto Produto  @relation(fields: [produtoId], references: [id])
-  pedido  Pedido?  @relation(fields: [pedidoId], references: [id])
-  usuario Usuario? @relation(fields: [usuarioId], references: [id])
-
-  @@map("movimentacao_estoque")
-}
-
-model Fornecedor {
-  id         BigInt   @id @default(autoincrement()) @map("id_fornecedor")
-  nomeRazao  String   @map("nome_razao") @db.VarChar(160)
-  documento  String?  @db.VarChar(30)
-  telefone   String?  @db.VarChar(20)
-  email      String?  @db.VarChar(160)
-  ativo      Boolean  @default(true)
-
-  despesas Despesa[]
-
-  @@map("fornecedor")
-}
-
-model Despesa {
-  id             BigInt   @id @default(autoincrement()) @map("id_despesa")
-  usuarioId      BigInt   @map("id_usuario")
-  fornecedorId   BigInt?  @map("id_fornecedor")
-  categoria      String   @db.VarChar(60)
-  descricao      String?  @db.VarChar(255)
-  quantidade     Decimal? @db.Decimal(12, 3)
-  valorTotal     Decimal  @map("valor_total") @db.Decimal(12, 2)
-  dataLancamento DateTime @map("data_lancamento") @db.Date
-
-  usuario    Usuario     @relation(fields: [usuarioId], references: [id])
-  fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
-
-  @@map("despesa")
-}
-
-model PerdaDesperdicio {
-  id          BigInt   @id @default(autoincrement()) @map("id_perda")
-  produtoId   BigInt   @map("id_produto")
-  usuarioId   BigInt   @map("id_usuario")
-  quantidade  Decimal  @db.Decimal(12, 3)
-  motivo      String   @db.VarChar(80)
-  observacao  String?
-  dataHora    DateTime @default(now()) @map("data_hora")
-
-  produto Produto @relation(fields: [produtoId], references: [id])
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
-
-  @@map("perda_desperdicio")
-}
-
-model DestinatarioFiscal {
-  id                BigInt  @id @default(autoincrement()) @map("id_destinatario")
-  nomeRazao         String  @map("nome_razao") @db.VarChar(160)
-  cpfCnpj           String  @map("cpf_cnpj") @db.VarChar(20)
-  email             String? @db.VarChar(160)
-  telefone          String? @db.VarChar(20)
-  cep               String? @db.VarChar(10)
-  logradouro        String? @db.VarChar(180)
-  numero            String? @db.VarChar(20)
-  complemento       String? @db.VarChar(120)
-  bairro            String? @db.VarChar(100)
-  cidade            String? @db.VarChar(100)
-  uf                String? @db.Char(2)
-  inscricaoEstadual String? @map("inscricao_estadual") @db.VarChar(30)
-
-  documentos DocumentoFiscal[]
-
-  @@map("destinatario_fiscal")
-}
-
-model DocumentoFiscal {
-  id              BigInt               @id @default(autoincrement()) @map("id_documento")
-  pedidoId        BigInt               @map("id_pedido")
-  destinatarioId  BigInt?              @map("id_destinatario")
-  tipoDocumento   TipoDocumentoFiscal  @map("tipo_documento")
-  numero          String?              @db.VarChar(30)
-  chaveAcesso     String?              @map("chave_acesso") @db.VarChar(60)
-  statusFiscal    StatusFiscal         @map("status_fiscal")
-  motivoRejeicao  String?              @map("motivo_rejeicao")
-  dataEmissao     DateTime             @default(now()) @map("data_emissao")
-
-  pedido        Pedido               @relation(fields: [pedidoId], references: [id])
-  destinatario  DestinatarioFiscal?  @relation(fields: [destinatarioId], references: [id])
-
-  @@map("documento_fiscal")
-}
-
-model FechamentoCaixa {
-  id            BigInt    @id @default(autoincrement()) @map("id_fechamento")
-  usuarioId     BigInt    @map("id_usuario")
-  dataAbertura  DateTime  @map("data_abertura")
-  dataFechamento DateTime? @map("data_fechamento")
-  totalDinheiro Decimal   @default(0) @map("total_dinheiro") @db.Decimal(12, 2)
-  totalPix      Decimal   @default(0) @map("total_pix") @db.Decimal(12, 2)
-  totalDebito   Decimal   @default(0) @map("total_debito") @db.Decimal(12, 2)
-  totalCredito  Decimal   @default(0) @map("total_credito") @db.Decimal(12, 2)
-  diferenca     Decimal?  @db.Decimal(12, 2)
-
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
-
-  @@map("fechamento_caixa")
-}
-
-model Sincronizacao {
-  id                    BigInt              @id @default(autoincrement()) @map("id_sincronizacao")
-  pedidoId              BigInt?             @map("id_pedido")
-  identificadorOperacao String              @unique @default(uuid()) @map("identificador_operacao") @db.Uuid
-  tipoOperacao          String              @map("tipo_operacao") @db.VarChar(60)
-  statusSincronizacao   StatusSincronizacao @map("status_sincronizacao")
-  tentativas            Int                 @default(0)
-  ultimaTentativa       DateTime?           @map("ultima_tentativa")
-  mensagemErro          String?             @map("mensagem_erro")
-
-  pedido Pedido? @relation(fields: [pedidoId], references: [id])
-
-  @@map("sincronizacao")
-}
-
-model Auditoria {
-  id             BigInt   @id @default(autoincrement()) @map("id_auditoria")
-  usuarioId      BigInt?  @map("id_usuario")
-  modulo         String   @db.VarChar(60)
-  acao           String   @db.VarChar(100)
-  entidade       String   @db.VarChar(80)
-  idRegistro     String?  @map("id_registro") @db.VarChar(80)
-  dadosAnteriores Json?   @map("dados_anteriores")
-  dadosNovos     Json?    @map("dados_novos")
-  dataHora       DateTime @default(now()) @map("data_hora")
-
-  usuario Usuario? @relation(fields: [usuarioId], references: [id])
-
-  @@map("auditoria")
-}
-
-model CartaoToken {
-  id            BigInt  @id @default(autoincrement()) @map("id_cartao_token")
-  clienteId     BigInt  @map("id_cliente")
-  tokenGateway  String  @map("token_gateway") @db.VarChar(255)
-  bandeira      String? @db.VarChar(30)
-  ultimosQuatro String? @map("ultimos_quatro") @db.Char(4)
-  ativo         Boolean @default(true)
-
-  cliente Cliente @relation(fields: [clienteId], references: [id])
-
-  @@map("cartao_token")
-}
-
-model BackupLog {
-  id           BigInt        @id @default(autoincrement()) @map("id_backup")
-  inicio       DateTime
-  fim          DateTime?
-  status       StatusBackup?
-  destino      String?       @db.VarChar(120)
-  arquivo      String?       @db.VarChar(255)
-  mensagemErro String?       @map("mensagem_erro")
-
-  @@map("backup_log")
-}
-
-// Registro de cada tentativa de notificação (WhatsApp) por estágio do pedido.
-model Notificacao {
-  id          BigInt                 @id @default(autoincrement()) @map("id_notificacao")
-  pedidoId    BigInt                 @map("id_pedido")
-  tipoEvento  TipoEventoNotificacao  @map("tipo_evento")
-  canal       String                 @default("WHATSAPP") @db.VarChar(20)
-  statusEnvio StatusEnvioNotificacao @map("status_envio")
-  mensagemErro String?               @map("mensagem_erro")
-  dataHora    DateTime               @default(now()) @map("data_hora")
-
-  pedido Pedido @relation(fields: [pedidoId], references: [id])
-
-  @@map("notificacao")
+  @@map("pagamentos")
 }

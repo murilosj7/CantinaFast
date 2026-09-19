@@ -28,6 +28,7 @@
     "prisma": "^6.19.3"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.5.1",
     "tsx": "^4.23.13",
