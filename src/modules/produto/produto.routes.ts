@@ -9,6 +9,7 @@ import { buscarProdutoPorId } from "./buscarProdutoPorId";
 import { buscarProdutoPorCodigoBarras } from "./buscarProdutoPorCodigoBarras";
 import { atualizarProduto } from "./atualizarProduto";
 import { inativarProduto } from "./inativarProduto";
+import { ajustarEstoque } from "./ajustarEstoque";
 
 // Montado em /produtos (server.ts): GET / e GET /:id são os do catálogo do Site Cliente (contrato 2.2), por isso são públicos.
 export const produtoRoutes = Router();
@@ -25,3 +26,5 @@ produtoRoutes.get("/:id", buscarProdutoPorId);
 produtoRoutes.patch("/:id", autenticar, atualizarProduto);
 // PATCH /produtos/:id/inativar -> atalho para inativar. PROTEGIDA.
 produtoRoutes.patch("/:id/inativar", autenticar, inativarProduto);
+// PATCH /produtos/:id/estoque -> reposição (ENTRADA) ou correção de contagem (AJUSTE) do estoque. PROTEGIDA (qualquer perfil logado).
+produtoRoutes.patch("/:id/estoque", autenticar, ajustarEstoque);
