@@ -1,4 +1,5 @@
 import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { Link } from 'react-router-dom';
 import type { Tom } from '../lib/format';
 
 /* ---------- Botão ---------- */
@@ -48,6 +49,18 @@ export function Button({
       {carregando && <Spinner />}
       {children}
     </button>
+  );
+}
+
+// Link com cara de botão (navega sem recarregar a página).
+export function BotaoLink({ para, variante = 'primario', children }: { para: string; variante?: Variante; children: ReactNode }) {
+  return (
+    <Link
+      to={para}
+      className={`inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${VARIANTES[variante]}`}
+    >
+      {children}
+    </Link>
   );
 }
 
