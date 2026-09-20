@@ -97,8 +97,8 @@ const paraProduto = (p) => ({
   criadoEm: p.criadoEm,
 });
 
-function parseId(valor) {
-  if (!/^\d+$/.test(String(valor))) throw new ApiErro(400, "O campo 'id' deve ser um número inteiro positivo.", 'id');
+function parseId(valor, campo = 'id') {
+  if (!/^\d+$/.test(String(valor))) throw new ApiErro(400, `O campo '${campo}' deve ser um número inteiro positivo.`, campo);
   return Number(valor);
 }
 
@@ -410,6 +410,89 @@ rota('GET', '/pedidos/(\\d+)', (req, body, p) => {
   const pedido = pedidos.find((x) => x.id === parseId(p[1]));
   if (!pedido) throw new ApiErro(404, 'Pedido não encontrado.');
   return { corpo: pedido };
+});
+
+// POST /pedidos: mesmas validações do backend (canal, itens, produto ativo, estoque) e baixa de estoque.
+rota('POST', '/pedidos', (req, body) => {
+  const usuario = autenticar(req);
+  const { canal, itens } = body ?? {};
+  const canalLido = typeof canal === 'string' ? canal.trim().toUpperCase() : '';
+  if (!['PRESENCIAL', 'ONLINE'].includes(canalLido)) throw new ApiErro(400, 'Canal inválido. Use: PRESENCIAL ou ONLINE.', 'canal');
+  if (!Array.isArray(itens) || itens.length === 0 || itens.length > 100) throw new ApiErro(400, "Informe a lista 'itens' com 1 a 100 itens.", 'itens');
+
+  const vistos = new Set();
+  const lidos = itens.map((item, i) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw new ApiErro(400, `O item ${i + 1} deve ser um objeto { produtoId, quantidade }.`, `itens[${i}]`);
+    const produtoId = parseId(item.produtoId);
+    const q = item.quantidade;
+    if (typeof q !== 'number' || !Number.isInteger(q) || q < 1) throw new ApiErro(400, `A quantidade do item ${i + 1} deve ser um número inteiro maior que zero.`, `itens[${i}].quantidade`);
+    if (vistos.has(produtoId)) throw new ApiErro(400, `O produto ${produtoId} aparece mais de uma vez em 'itens'. Some as quantidades num único item.`, 'itens');
+    vistos.add(produtoId);
+    return { produtoId, quantidade: q };
+  });
+
+  // Valida tudo antes de gravar (o backend real faz numa transação: ou grava tudo, ou nada).
+  const linhas = lidos.map(({ produtoId, quantidade }) => {
+    const produto = produtos.find((x) => x.id === produtoId);
+    if (!produto) throw new ApiErro(400, `O produto ${produtoId} não existe.`, 'itens');
+    if (!produto.ativo) throw new ApiErro(400, `O produto "${produto.nome}" está inativo.`, 'itens');
+    const disponivel = produto.fisica - produto.reservada;
+    if (disponivel < quantidade) throw new ApiErro(400, `Estoque insuficiente para "${produto.nome}": disponível ${Math.max(0, disponivel)}, solicitado ${quantidade}.`, 'itens');
+    return { produto, quantidade };
+  });
+
+  const id = proximoId(pedidos);
+  const itensPedido = linhas.map(({ produto, quantidade }, idx) => ({
+    id: id * 10 + idx, produtoId: produto.id, nome: produto.nome, imagemUrl: produto.imagemUrl ?? '',
+    quantidade, precoUnitario: produto.preco, subtotal: arred(produto.preco * quantidade),
+  }));
+  linhas.forEach(({ produto, quantidade }) => (produto.fisica -= quantidade));
+  const novo = {
+    id, canal: canalLido, status: 'ABERTO', total: arred(itensPedido.reduce((s, it) => s + it.subtotal, 0)),
+    usuarioId: usuario.id, clienteId: null, criadoEm: new Date().toISOString(), itens: itensPedido, pagamentos: [],
+  };
+  pedidos.unshift(novo);
+  return { status: 201, corpo: novo };
+});
+
+// --- pagamentos (todas exigem token; qualquer perfil) ---
+// Igual ao backend: um pagamento com o valor EXATO do pedido, já APROVADO, e o pedido vira PAGO.
+const STATUS_PAGAVEIS = ['ABERTO', 'ENVIADO_AO_CAIXA', 'AGUARDANDO_PAGAMENTO'];
+
+function garantirPedidoPagavel(status) {
+  if (status === 'PAGO') throw new ApiErro(400, 'Este pedido já está pago.', 'pedidoId');
+  if (status === 'CANCELADO' || status === 'ESTORNADO') throw new ApiErro(400, `Pedido ${status.toLowerCase()} não pode receber pagamento.`, 'pedidoId');
+  if (!STATUS_PAGAVEIS.includes(status)) throw new ApiErro(400, `Este pedido já foi pago e está em andamento (status ${status}).`, 'pedidoId');
+}
+
+rota('POST', '/pagamentos', (req, body) => {
+  autenticar(req);
+  const { pedidoId: pedidoIdBruto, formaPagamento, valor } = body ?? {};
+  const pedidoId = parseId(pedidoIdBruto, 'pedidoId');
+  const forma = typeof formaPagamento === 'string' ? formaPagamento.trim().toUpperCase() : '';
+  if (!['PIX', 'CARTAO', 'DINHEIRO'].includes(forma)) throw new ApiErro(400, 'Forma de pagamento inválida. Use: PIX, CARTAO, DINHEIRO.', 'formaPagamento');
+  if (typeof valor !== 'number' || !Number.isFinite(valor) || valor <= 0) throw new ApiErro(400, 'O valor deve ser um número maior que zero (ex.: 12.5).', 'valor');
+  if (Math.abs(valor * 100 - Math.round(valor * 100)) > 1e-6) throw new ApiErro(400, 'O valor deve ter no máximo 2 casas decimais.', 'valor');
+
+  const pedido = pedidos.find((x) => x.id === pedidoId);
+  if (!pedido) throw new ApiErro(400, 'Pedido não encontrado.', 'pedidoId');
+  garantirPedidoPagavel(pedido.status);
+  if (Math.round(valor * 100) !== Math.round(pedido.total * 100)) {
+    throw new ApiErro(400, `O valor (${valor}) deve ser igual ao total do pedido (${pedido.total}).`, 'valor');
+  }
+
+  const proximo = pedidos.flatMap((x) => x.pagamentos).reduce((m, pg) => Math.max(m, pg.id), 0) + 1;
+  const pagamento = { id: proximo, formaPagamento: forma, statusPagamento: 'APROVADO', valor, identificadorExterno: null, criadoEm: new Date().toISOString() };
+  pedido.pagamentos.push(pagamento);
+  pedido.status = 'PAGO';
+  return { status: 201, corpo: { ...pagamento, pedidoId, pedido: { id: pedidoId, status: 'PAGO', total: valor } } };
+});
+
+rota('GET', '/pagamentos/pedido/(\\d+)', (req, body, p) => {
+  autenticar(req);
+  const pedido = pedidos.find((x) => x.id === parseId(p[1], 'pedidoId'));
+  if (!pedido) throw new ApiErro(404, 'Pedido não encontrado.');
+  return { corpo: pedido.pagamentos.map((pg) => ({ ...pg, pedidoId: pedido.id })) };
 });
 
 /* ---------- Servidor ---------- */
