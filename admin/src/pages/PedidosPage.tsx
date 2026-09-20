@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Alerta, Badge, Button, LinhaMensagem, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
+import { useLocation } from 'react-router-dom';
+import { Alerta, Badge, Button, BotaoLink, LinhaMensagem, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
 import {
   CANAL_ROTULO,
   dataHora,
@@ -11,8 +12,10 @@ import {
   STATUS_PEDIDO_TOM,
 } from '../lib/format';
 import { useCarregar } from '../lib/useCarregar';
+import { pagamentoService, STATUS_PAGAVEIS } from '../services/pagamentoService';
 import { pedidoService } from '../services/pedidoService';
-import type { CanalPedido, StatusPedido } from '../types';
+import type { CanalPedido, FormaPagamento, Pedido, StatusPedido } from '../types';
+import { lerErro } from '../lib/api';
 
 const STATUS = Object.keys(STATUS_PEDIDO_ROTULO) as StatusPedido[];
 const CANAIS = Object.keys(CANAL_ROTULO) as CanalPedido[];
@@ -22,7 +25,9 @@ export function PedidosPage() {
   const [pagina, setPagina] = useState(1);
   const [status, setStatus] = useState<StatusPedido | ''>('');
   const [canal, setCanal] = useState<CanalPedido | ''>('');
-  const [aberto, setAberto] = useState<number | null>(null);
+  // A tela de novo pedido manda para cá com o pedido recém-criado já aberto.
+  const local = useLocation();
+  const [aberto, setAberto] = useState<number | null>((local.state as { abrirPedido?: number } | null)?.abrirPedido ?? null);
 
   const { dados, carregando, erro, recarregar } = useCarregar(
     () => pedidoService.listar({ pagina, limite: POR_PAGINA, status, canal }),
@@ -42,7 +47,11 @@ export function PedidosPage() {
 
   return (
     <>
-      <PaginaCabecalho titulo="Pedidos" descricao="Do mais recente para o mais antigo. Clique em um pedido para ver itens e pagamentos." />
+      <PaginaCabecalho
+        titulo="Pedidos"
+        descricao="Do mais recente para o mais antigo. Clique em um pedido para ver itens e pagamentos."
+        acao={<BotaoLink para="/pedidos/novo">Novo pedido</BotaoLink>}
+      />
 
       <div className="space-y-4">
         {erro && (
@@ -142,14 +151,15 @@ export function PedidosPage() {
       </div>
 
       <Modal aberto={aberto !== null} titulo={aberto ? `Pedido #${aberto}` : 'Pedido'} aoFechar={() => setAberto(null)} largura="max-w-3xl">
-        {aberto !== null && <DetalhePedido id={aberto} />}
+        {aberto !== null && <DetalhePedido id={aberto} aoAlterar={recarregar} />}
       </Modal>
     </>
   );
 }
 
-function DetalhePedido({ id }: { id: number }) {
-  const { dados: pedido, carregando, erro, recarregar } = useCarregar(() => pedidoService.buscar(id), [id]);
+function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => void }) {
+  const { dados: pedido, erro, recarregar } = useCarregar(() => pedidoService.buscar(id), [id]);
+  const [mensagem, setMensagem] = useState<string | null>(null);
 
   if (erro) {
     return (
@@ -164,12 +174,25 @@ function DetalhePedido({ id }: { id: number }) {
       </Alerta>
     );
   }
-  if (carregando || !pedido) return <p className="py-6 text-center text-carvao/65">Carregando…</p>;
+  if (!pedido) return <p className="py-6 text-center text-carvao/65">Carregando…</p>;
 
   const pagamentos = pedido.pagamentos ?? [];
 
   return (
     <div className="space-y-6">
+      {mensagem && <Alerta tipo="sucesso">{mensagem}</Alerta>}
+
+      {STATUS_PAGAVEIS.includes(pedido.status) && (
+        <RegistrarPagamento
+          pedido={pedido}
+          aoRegistrar={() => {
+            setMensagem(`Pagamento de ${moeda(pedido.total)} registrado. O pedido está pago.`);
+            recarregar(); // atualiza o detalhe (status e lista de pagamentos)
+            aoAlterar(); // atualiza a listagem atrás do modal
+          }}
+        />
+      )}
+
       <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-carvao/65">Status</dt>
@@ -262,6 +285,72 @@ function DetalhePedido({ id }: { id: number }) {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+// O backend aceita um único pagamento, do valor exato do pedido, e já o marca como aprovado.
+function RegistrarPagamento({ pedido, aoRegistrar }: { pedido: Pedido; aoRegistrar: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [forma, setForma] = useState<FormaPagamento>('PIX');
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  async function confirmar() {
+    setSalvando(true);
+    setErro(null);
+    try {
+      await pagamentoService.registrar({ pedidoId: pedido.id, formaPagamento: forma, valor: pedido.total });
+      aoRegistrar();
+    } catch (e) {
+      // Ex.: 400 "Este pedido já está pago." se outra pessoa pagou antes.
+      setErro(lerErro(e).mensagem);
+      setSalvando(false);
+    }
+  }
+
+  if (!aberto) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-brasa-200 bg-brasa-50 px-4 py-3">
+        <p className="text-sm">
+          Este pedido ainda não foi pago. Total a receber: <strong>{moeda(pedido.total)}</strong>.
+        </p>
+        <Button onClick={() => setAberto(true)}>Registrar pagamento</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 rounded-card border border-brasa-200 bg-brasa-50 p-4">
+      <h3 className="text-lg font-semibold">Registrar pagamento</h3>
+      {erro && <Alerta>{erro}</Alerta>}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="forma-pagamento" className="mb-1 block text-sm font-medium">
+            Forma de pagamento
+          </label>
+          <Selecao id="forma-pagamento" value={forma} onChange={(e) => setForma(e.target.value as FormaPagamento)}>
+            {(Object.keys(FORMA_PAGAMENTO_ROTULO) as FormaPagamento[]).map((f) => (
+              <option key={f} value={f}>
+                {FORMA_PAGAMENTO_ROTULO[f]}
+              </option>
+            ))}
+          </Selecao>
+        </div>
+        <div>
+          <p className="mb-1 text-sm font-medium">Valor</p>
+          <p className="rounded-md border border-carvao/15 bg-white px-3 py-2 text-sm font-semibold tabular-nums">{moeda(pedido.total)}</p>
+          <p className="mt-1 text-xs text-carvao/65">Igual ao total do pedido. Não há pagamento parcial.</p>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button variante="secundario" onClick={() => setAberto(false)} disabled={salvando}>
+          Cancelar
+        </Button>
+        <Button onClick={confirmar} carregando={salvando}>
+          Confirmar pagamento
+        </Button>
+      </div>
     </div>
   );
 }
