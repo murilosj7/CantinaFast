@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================================
+// ENUMS
+// Valores fixos definidos na documentação (Seção 5.7).
+// Usar enum em vez de texto livre impede gravar um status
+// inválido no banco - é uma trava de integridade.
+// ==========================================================
+
+enum PerfilUsuario {
+  ATENDENTE
+  CAIXA
+  ADMINISTRADOR
+}
+
+enum TipoMovimentacaoEstoque {
+  ENTRADA
+  SAIDA
+  PERDA
+  AJUSTE
+}
+
+enum CanalPedido {
+  PRESENCIAL
+  ONLINE
+}
+
+// Combina os status de pedido presencial e online (Seção 5.7).
+// Qual subconjunto é válido para qual canal é regra de negócio
+// do módulo de vendas/pedidos (Victor) - o banco só garante que
+// o valor gravado é um status conhecido.
+enum StatusPedido {
+  ABERTO
+  ENVIADO_AO_CAIXA
+  AGUARDANDO_PAGAMENTO
+  PAGO
+  RECEBIDO_PELA_CANTINA
+  EM_SEPARACAO
+  PRONTO_PARA_RETIRADA
+  ENTREGUE
+  RETIRADO
+  CANCELADO
+  ESTORNADO
+}
+
+enum FormaPagamento {
+  PIX
+  CARTAO
+  DINHEIRO
+}
+
+enum StatusPagamento {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  CANCELADO
+  EXPIRADO
+  ESTORNADO
+}
+
+// ==========================================================
+// MODELOS - escopo reduzido para os 5 CRUDs da pré-banca
+// (Usuários, Produtos, Estoque/Movimentações, Vendas, Pagamentos).
+// As demais entidades do DER completo (Cliente, Sincronizacao,
+// Auditoria, DocumentoFiscal, Backup, Notificacao, Financeiro,
+// Fornecedor, etc.) entram depois da pré-banca.
+// ==========================================================
+
+model Usuario {
+  id        Int           @id @default(autoincrement())
+  nome      String
+  login     String        @unique
+  senhaHash String // hash da senha; a lógica de autenticação em si é do módulo de auth (Victor)
+  perfil    PerfilUsuario
+  ativo     Boolean       @default(true)
+  criadoEm  DateTime      @default(now())
+
+  movimentacoesEstoque MovimentacaoEstoque[]
+  pedidos              Pedido[]
+
+  @@map("usuarios")
+}
+
+model Categoria {
+  id    Int     @id @default(autoincrement())
+  nome  String
+  ativa Boolean @default(true)
+
+  produtos Produto[]
+
+  @@map("categorias")
+}
+
+model Produto {
+  id                   Int      @id @default(autoincrement())
+  categoriaId          Int
+  nome                 String
+  descricao            String?
+  precoVenda           Decimal  @db.Decimal(10, 2)
+  codigoBarras         String?  @unique
+  imagemUrl            String?
+  disponivelPresencial Boolean  @default(true)
+  disponivelOnline     Boolean  @default(true)
+  ativo                Boolean  @default(true)
+  criadoEm             DateTime @default(now())
+
+  categoria            Categoria             @relation(fields: [categoriaId], references: [id])
+  estoque              Estoque?
+  movimentacoesEstoque MovimentacaoEstoque[]
+  itensPedido          ItemPedido[]
+
+  @@map("produtos")
+}
+
+// Relação 1:1 com Produto - cada produto tem um único registro de saldo de estoque.
+// O histórico de entradas/saídas fica em MovimentacaoEstoque.
+model Estoque {
+  id                  Int @id @default(autoincrement())
+  produtoId           Int @unique
+  quantidadeFisica    Int @default(0)
+  quantidadeReservada Int @default(0)
+  estoqueMinimo       Int @default(0)
+
+  produto Produto @relation(fields: [produtoId], references: [id])
+
+  @@map("estoque")
+}
+
+model MovimentacaoEstoque {
+  id         Int                     @id @default(autoincrement())
+  produtoId  Int
+  usuarioId  Int
+  tipo       TipoMovimentacaoEstoque
+  quantidade Int
+  motivo     String?
+  criadoEm   DateTime                @default(now())
+
+  produto Produto @relation(fields: [produtoId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@map("movimentacoes_estoque")
+}
+
+model Pedido {
+  id         Int          @id @default(autoincrement())
+  usuarioId  Int // funcionário que abriu/registrou o pedido
+  clienteId  Int? // sem tabela Cliente ainda neste escopo reduzido; campo fica pronto pra quando ela existir
+  canal      CanalPedido
+  status     StatusPedido @default(ABERTO)
+  valorTotal Decimal      @db.Decimal(10, 2) @default(0)
+  criadoEm   DateTime     @default(now())
+
+  usuario    Usuario      @relation(fields: [usuarioId], references: [id])
+  itens      ItemPedido[]
+  pagamentos Pagamento[]
+
+  @@map("pedidos")
+}
+
+model ItemPedido {
+  id            Int     @id @default(autoincrement())
+  pedidoId      Int
+  produtoId     Int
+  quantidade    Int
+  precoUnitario Decimal @db.Decimal(10, 2)
+  subtotal      Decimal @db.Decimal(10, 2)
+
+  pedido  Pedido  @relation(fields: [pedidoId], references: [id])
+  produto Produto @relation(fields: [produtoId], references: [id])
+
+  @@map("itens_pedido")
+}
+
+model Pagamento {
+  id                   Int             @id @default(autoincrement())
+  pedidoId             Int
+  formaPagamento       FormaPagamento
+  statusPagamento      StatusPagamento @default(PENDENTE)
+  valor                Decimal         @db.Decimal(10, 2)
+  identificadorExterno String?
+  criadoEm             DateTime        @default(now())
+
+  pedido Pedido @relation(fields: [pedidoId], references: [id])
+
+  @@map("pagamentos")
+}
