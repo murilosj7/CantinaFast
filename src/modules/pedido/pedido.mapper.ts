@@ -25,8 +25,8 @@ export const pedidoCompletoInclude = {
 export type PedidoComItens = Prisma.PedidoGetPayload<{ include: typeof pedidoComItensInclude }>;
 export type PedidoCompleto = Prisma.PedidoGetPayload<{ include: typeof pedidoCompletoInclude }>;
 
-// Converte um pagamento do banco para a resposta (dinheiro como número).
-function paraPagamento(pagamento: Pagamento) {
+// Converte um pagamento do banco para a resposta (dinheiro como número). Exportada: o módulo pagamento reaproveita.
+export function paraPagamento(pagamento: Pagamento) {
   return {
     id: pagamento.id,
     formaPagamento: pagamento.formaPagamento,

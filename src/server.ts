@@ -10,6 +10,7 @@ import { usuarioRoutes } from "./modules/usuario/usuario.routes";
 import { categoriaRoutes } from "./modules/categoria/categoria.routes";
 import { produtoRoutes } from "./modules/produto/produto.routes";
 import { pedidoRoutes } from "./modules/pedido/pedido.routes";
+import { pagamentoRoutes } from "./modules/pagamento/pagamento.routes";
 
 // Cria a aplicação Express: é ela que recebe todas as requisições.
 const app = express();
@@ -35,6 +36,8 @@ app.use("/categorias", categoriaRoutes);
 app.use("/produtos", produtoRoutes);
 // Tudo que começar com /pedidos é resolvido pelas rotas do módulo de pedido (todas protegidas).
 app.use("/pedidos", pedidoRoutes);
+// Tudo que começar com /pagamentos é resolvido pelas rotas do módulo de pagamento (todas protegidas).
+app.use("/pagamentos", pagamentoRoutes);
 
 // Sempre por último: 404 padronizado e tratamento de erro genérico.
 // Se nenhuma rota acima respondeu, cai aqui e devolve "Rota não encontrada".
