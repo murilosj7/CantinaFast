@@ -72,6 +72,18 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
       res.status(400).json({ mensagem: "O registro referenciado não existe." });
       return;
     }
+    // P2034 = a transação falhou por conflito de escrita ou deadlock com outra requisição simultânea.
+    if (err.code === "P2034") {
+      // 409 = conflito; o cliente pode simplesmente repetir a operação.
+      res.status(409).json({ mensagem: "Conflito com outra operação simultânea. Tente novamente." });
+      return;
+    }
+    // P2028 = a transação não conseguiu conexão a tempo ou estourou o tempo limite (servidor ocupado).
+    if (err.code === "P2028") {
+      // 503 = indisponível no momento; tentar de novo em instantes costuma resolver.
+      res.status(503).json({ mensagem: "Servidor ocupado. Tente novamente em instantes." });
+      return;
+    }
   }
 
   // Qualquer outro erro é inesperado: registra no terminal para o desenvolvedor investigar.

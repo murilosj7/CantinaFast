@@ -60,6 +60,17 @@ export function lerBooleano(valor: unknown, campo: string): boolean {
   return valor;
 }
 
+// Quantidade inicial em estoque: número inteiro de 0 em diante (padrão 0 quando não vem no corpo).
+export function lerQuantidadeInicial(valor: unknown): number {
+  // Não veio (ou veio null): o produto começa com estoque zero.
+  if (valor === undefined || valor === null) return 0;
+  // Precisa ser número inteiro (sem fração, sem texto), não negativo e caber numa coluna inteira do banco.
+  if (typeof valor !== "number" || !Number.isInteger(valor) || valor < 0 || valor > 2147483647) {
+    throw new AppError("A quantidade inicial deve ser um número inteiro de 0 em diante.", 400, "quantidadeInicial");
+  }
+  return valor;
+}
+
 // Confere se a categoria existe e está ativa; caso contrário lança 400 apontando o campo categoriaId.
 export async function garantirCategoriaAtiva(categoriaId: number) {
   // Procura a categoria no banco.
