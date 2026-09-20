@@ -5,6 +5,7 @@ import { prisma } from "./config/prisma";
 // Importa o middleware de erro genérico e o tratador de rota inexistente (404).
 import { errorHandler, rotaNaoEncontrada } from "./middlewares/errorHandler";
 // Importa o conjunto de rotas de cada módulo (cada um mora na sua pasta em src/modules).
+import { authRoutes } from "./modules/auth/auth.routes";
 import { usuarioRoutes } from "./modules/usuario/usuario.routes";
 import { categoriaRoutes } from "./modules/categoria/categoria.routes";
 import { produtoRoutes } from "./modules/produto/produto.routes";
@@ -23,6 +24,8 @@ app.get("/health", async (req, res) => {
   res.json({ status: "ok", totalUsuarios });
 });
 
+// /interno/login e /interno/me são resolvidos pelas rotas do módulo de autenticação.
+app.use("/interno", authRoutes);
 // Tudo que começar com /interno/usuarios é resolvido pelas rotas do módulo de usuário.
 app.use("/interno/usuarios", usuarioRoutes);
 // Tudo que começar com /categorias é resolvido pelas rotas do módulo de categoria.
