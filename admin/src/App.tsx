@@ -3,6 +3,7 @@ import { ProtectedRoute } from './auth/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { CategoriasPage } from './pages/CategoriasPage';
 import { LoginPage } from './pages/LoginPage';
+import { NovoPedidoPage } from './pages/NovoPedidoPage';
 import { PedidosPage } from './pages/PedidosPage';
 import { ProdutosPage } from './pages/ProdutosPage';
 import { UsuariosPage } from './pages/UsuariosPage';
@@ -21,6 +22,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/pedidos" replace />} />
         <Route path="pedidos" element={<PedidosPage />} />
+        <Route path="pedidos/novo" element={<NovoPedidoPage />} />
         <Route path="produtos" element={<ProdutosPage />} />
         <Route path="categorias" element={<CategoriasPage />} />
         <Route

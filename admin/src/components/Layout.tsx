@@ -12,6 +12,7 @@ interface ItemMenu {
 }
 
 const ITENS: ItemMenu[] = [
+  { para: '/pedidos/novo', rotulo: 'Novo pedido' },
   { para: '/pedidos', rotulo: 'Pedidos' },
   { para: '/produtos', rotulo: 'Produtos' },
   { para: '/categorias', rotulo: 'Categorias' },
@@ -54,6 +55,7 @@ export function Layout() {
               <li key={item.para}>
                 <NavLink
                   to={item.para}
+                  end
                   className={({ isActive }) =>
                     `block rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-400 ${
                       isActive ? 'bg-brasa-600 text-white' : 'text-creme/85 hover:bg-white/10'
