@@ -20,7 +20,7 @@ async function seedAdmin() {
   // Senha em texto: só existe na memória durante este script e nunca é impressa.
   const senha = process.env.SEED_ADMIN_SENHA ?? "";
 
-  // Login é obrigatório e cabe até 120 caracteres (tamanho da coluna).
+  // Login é obrigatório e cabe até 120 caracteres (limite da API).
   if (login === "" || login.length > 120) {
     throw new Error("Defina SEED_ADMIN_LOGIN (até 120 caracteres) no .env ou no ambiente.");
   }
@@ -28,7 +28,7 @@ async function seedAdmin() {
   if (senha.length < 6) {
     throw new Error("Defina SEED_ADMIN_SENHA (pelo menos 6 caracteres) no .env ou no ambiente.");
   }
-  // Nome cabe até 120 caracteres (tamanho da coluna).
+  // Nome cabe até 120 caracteres (limite da API).
   if (nome.length > 120) {
     throw new Error("SEED_ADMIN_NOME aceita no máximo 120 caracteres.");
   }

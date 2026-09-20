@@ -10,7 +10,7 @@ export async function criarCategoria(req: Request, res: Response) {
   // Pega o nome do corpo da requisição (se não veio corpo, usa um objeto vazio).
   const { nome } = req.body ?? {};
 
-  // Nome: precisa ser texto, não vazio e ter no máximo 80 caracteres (tamanho da coluna).
+  // Nome: precisa ser texto, não vazio e ter no máximo 80 caracteres (limite da API).
   if (typeof nome !== "string" || nome.trim() === "" || nome.trim().length > 80) {
     // Recusa com 400 e aponta o campo "nome".
     throw new AppError("Informe o nome da categoria (até 80 caracteres).", 400, "nome");

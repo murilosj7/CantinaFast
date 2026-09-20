@@ -14,7 +14,7 @@ export async function criarUsuario(req: Request, res: Response) {
   // Pega os quatro campos do corpo da requisição (se não veio corpo, usa um objeto vazio).
   const { nome, login, senha, perfil } = req.body ?? {};
 
-  // Nome: precisa ser texto, não pode ser vazio e cabe até 120 caracteres (tamanho da coluna).
+  // Nome: precisa ser texto, não pode ser vazio e cabe até 120 caracteres (limite da API).
   if (typeof nome !== "string" || nome.trim() === "" || nome.trim().length > 120) {
     // Recusa com 400 e aponta o campo "nome" para o frontend.
     throw new AppError("Informe o nome (até 120 caracteres).", 400, "nome");

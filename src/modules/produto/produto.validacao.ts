@@ -7,7 +7,7 @@ import { AppError } from "../../middlewares/errorHandler";
 
 // Valida o nome do produto e devolve ele sem espaços nas pontas.
 export function lerNome(valor: unknown): string {
-  // Precisa ser texto, não vazio e ter até 140 caracteres (tamanho da coluna).
+  // Precisa ser texto, não vazio e ter até 140 caracteres (limite da API).
   if (typeof valor !== "string" || valor.trim() === "" || valor.trim().length > 140) {
     throw new AppError("Informe o nome do produto (até 140 caracteres).", 400, "nome");
   }
@@ -15,14 +15,14 @@ export function lerNome(valor: unknown): string {
 }
 
 // Recebe o preço como NÚMERO (contrato: valor monetário é número) e devolve uma string "12.50"
-// para gravar no Decimal(12,2) sem erro de ponto flutuante.
+// para gravar no Decimal(10,2) sem erro de ponto flutuante.
 export function lerPreco(valor: unknown): string {
   // Só aceita número de verdade e finito (recusa texto, null, NaN e infinito).
   if (typeof valor !== "number" || !Number.isFinite(valor)) {
     throw new AppError("O preço deve ser um número (ex.: 12.5).", 400, "preco");
   }
-  // Precisa ser maior que zero e caber no Decimal(12,2) (máximo 9.999.999.999,99).
-  if (valor <= 0 || valor > 9999999999.99) {
+  // Precisa ser maior que zero e caber no Decimal(10,2) da coluna precoVenda (máximo 99.999.999,99).
+  if (valor <= 0 || valor > 99999999.99) {
     throw new AppError("O preço deve ser maior que zero.", 400, "preco");
   }
   // Confere se tem no máximo 2 casas decimais (multiplica por 100 e vê se sobra fração; 1e-6 é a tolerância).
