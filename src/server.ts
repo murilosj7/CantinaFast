@@ -8,7 +8,7 @@ import cors from "cors";
 import { prisma } from "./config/prisma";
 // Importa o middleware de erro genérico e o tratador de rota inexistente (404).
 import { errorHandler, rotaNaoEncontrada } from "./middlewares/errorHandler";
-// Limitadores de requisições por IP: um específico do login (5 falhas/15 min) e um geral (100/min).
+// Limitadores de requisições por IP: um específico do login (LOGIN_RATE_LIMIT_MAX falhas/15 min, padrão 5) e um geral (100/min).
 import { limitadorGeral, limitadorLogin } from "./middlewares/rateLimit";
 // Opções do CORS (allowlist de origens vinda de CORS_ALLOWED_ORIGINS no .env).
 import { opcoesCors } from "./config/cors";
@@ -45,7 +45,7 @@ app.get("/health", async (req, res) => {
   res.json({ status: "ok", totalUsuarios });
 });
 
-// Segurança 3b: limite rígido só para tentativas de login (5 falhas por IP a cada 15 min). Vem ANTES das rotas de auth.
+// Segurança 3b: limite rígido só para tentativas de login (LOGIN_RATE_LIMIT_MAX falhas por IP a cada 15 min, padrão 5). Vem ANTES das rotas de auth.
 app.post("/interno/login", limitadorLogin);
 // /interno/login e /interno/me são resolvidos pelas rotas do módulo de autenticação.
 app.use("/interno", authRoutes);
