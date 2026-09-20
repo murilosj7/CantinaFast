@@ -24,6 +24,9 @@ import type { Categoria, Produto } from '../types';
 
 type Situacao = 'todos' | 'ativo' | 'inativo';
 
+// A API não devolve o estoque mínimo, então o alerta de "pouco estoque" usa um limite fixo.
+const ESTOQUE_BAIXO = 5;
+
 const CAMPOS_DO_FORM = ['nome', 'preco', 'categoriaId', 'descricao', 'codigoBarras', 'imagemUrl', 'quantidadeInicial'];
 
 function Miniatura({ url }: { url: string }) {
@@ -163,7 +166,9 @@ export function ProdutosPage() {
                     <td className={tabela.td}>{p.categoriaNome}</td>
                     <td className={`${tabela.td} text-right tabular-nums`}>{moeda(p.preco)}</td>
                     <td className={`${tabela.td} text-right tabular-nums`}>
-                      {p.quantidadeDisponivel === 0 ? <Badge tom="vermelho">Sem estoque</Badge> : p.quantidadeDisponivel}
+                      <Badge tom={p.quantidadeDisponivel === 0 ? 'vermelho' : p.quantidadeDisponivel <= ESTOQUE_BAIXO ? 'amarelo' : 'verde'}>
+                        {p.quantidadeDisponivel === 0 ? 'Sem estoque' : `${p.quantidadeDisponivel} un.`}
+                      </Badge>
                     </td>
                     <td className={tabela.td}>
                       <div className="flex flex-wrap gap-1">
