@@ -14,6 +14,7 @@ interface ItemMenu {
 const ITENS: ItemMenu[] = [
   { para: '/pedidos/novo', rotulo: 'Novo pedido' },
   { para: '/pedidos', rotulo: 'Pedidos' },
+  { para: '/pagamentos', rotulo: 'Pagamentos' },
   { para: '/produtos', rotulo: 'Produtos' },
   { para: '/estoque', rotulo: 'Estoque' },
   { para: '/categorias', rotulo: 'Categorias' },
