@@ -17,6 +17,8 @@ import { authRoutes } from "./modules/auth/auth.routes";
 import { usuarioRoutes } from "./modules/usuario/usuario.routes";
 import { categoriaRoutes } from "./modules/categoria/categoria.routes";
 import { produtoRoutes } from "./modules/produto/produto.routes";
+import { estoqueRoutes } from "./modules/produto/estoque.routes";
+import { movimentacaoRoutes } from "./modules/movimentacao/movimentacao.routes";
 import { pedidoRoutes } from "./modules/pedido/pedido.routes";
 import { pagamentoRoutes } from "./modules/pagamento/pagamento.routes";
 
@@ -55,6 +57,10 @@ app.use("/interno/usuarios", usuarioRoutes);
 app.use("/categorias", categoriaRoutes);
 // Tudo que começar com /produtos é resolvido pelas rotas do módulo de produto.
 app.use("/produtos", produtoRoutes);
+// Tudo que começar com /estoque é resolvido pelas rotas de saldos (também no módulo de produto; protegidas).
+app.use("/estoque", estoqueRoutes);
+// Tudo que começar com /movimentacoes é resolvido pelas rotas do módulo de movimentação (todas protegidas).
+app.use("/movimentacoes", movimentacaoRoutes);
 // Tudo que começar com /pedidos é resolvido pelas rotas do módulo de pedido (todas protegidas).
 app.use("/pedidos", pedidoRoutes);
 // Tudo que começar com /pagamentos é resolvido pelas rotas do módulo de pagamento (todas protegidas).
