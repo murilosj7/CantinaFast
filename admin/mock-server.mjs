@@ -42,7 +42,17 @@ const produtos = [
   { id: 6, nome: 'Prato feito do dia', descricao: 'Arroz, feijão, proteína e salada.', preco: 24.9, categoriaId: 4, codigoBarras: null, fisica: 12, reservada: 0, presencial: false, online: true, ativo: true },
   { id: 7, nome: 'Torta de limão (fatia)', descricao: '', preco: 9.9, categoriaId: 3, codigoBarras: null, fisica: 7, reservada: 0, presencial: true, online: true, ativo: false },
   { id: 8, nome: 'Panetone', descricao: 'Edição de fim de ano.', preco: 32, categoriaId: 5, codigoBarras: '7890000000080', fisica: 5, reservada: 0, presencial: true, online: true, ativo: true },
-].map((p) => ({ ...p, imagemUrl: '', criadoEm: diasAtras(25) }));
+].map((p) => ({ ...p, imagemUrl: '', criadoEm: diasAtras(25), minimo: { 1: 10, 2: 30, 3: 5, 4: 5, 5: 20, 6: 12, 7: 0, 8: 2 }[p.id] ?? 0 }));
+
+// Histórico de estoque de exemplo (o saldo dos produtos acima já considera estes lançamentos).
+const movimentacoes = [];
+const lancar = (produtoId, usuarioId, tipo, quantidade, motivo, dias) =>
+  movimentacoes.push({ id: movimentacoes.length + 1, produtoId, usuarioId, tipo, quantidade, motivo, criadoEm: diasAtras(dias) });
+produtos.forEach((p) => {
+  if (p.id === 3) { lancar(3, 1, 'ENTRADA', 20, 'Estoque inicial', 25); lancar(3, 3, 'PERDA', 2, 'Copos quebrados', 10); }
+  else if (p.id === 5) { lancar(5, 1, 'ENTRADA', 65, 'Estoque inicial', 25); lancar(5, 2, 'AJUSTE', -5, 'Contagem física', 7); }
+  else lancar(p.id, 1, 'ENTRADA', p.fisica, 'Estoque inicial', 25);
+});
 
 const STATUS = [
   'ABERTO', 'ENVIADO_AO_CAIXA', 'AGUARDANDO_PAGAMENTO', 'PAGO', 'RECEBIDO_PELA_CANTINA', 'EM_SEPARACAO',
@@ -76,6 +86,9 @@ class ApiErro extends Error {
     this.campo = campo;
   }
 }
+
+// O módulo de estoque do backend responde { erro } em vez de { mensagem, campo }.
+class ErroSimples extends ApiErro {}
 
 const proximoId = (lista) => lista.reduce((m, x) => Math.max(m, x.id), 0) + 1;
 
@@ -451,6 +464,9 @@ rota('POST', '/pedidos', (req, body) => {
     id, canal: canalLido, status: 'ABERTO', total: arred(itensPedido.reduce((s, it) => s + it.subtotal, 0)),
     usuarioId: usuario.id, clienteId: null, criadoEm: new Date().toISOString(), itens: itensPedido, pagamentos: [],
   };
+  linhas.forEach(({ produto, quantidade }) =>
+    movimentacoes.push({ id: proximoId(movimentacoes), produtoId: produto.id, usuarioId: usuario.id, tipo: 'SAIDA', quantidade, motivo: `Venda - pedido #${id}`, criadoEm: new Date().toISOString() }),
+  );
   pedidos.unshift(novo);
   return { status: 201, corpo: novo };
 });
@@ -495,6 +511,78 @@ rota('GET', '/pagamentos/pedido/(\\d+)', (req, body, p) => {
   return { corpo: pedido.pagamentos.map((pg) => ({ ...pg, pedidoId: pedido.id })) };
 });
 
+// --- estoque e movimentações ---
+// Réplica fiel do módulo do Murilo: SEM autenticação, usuarioId vem no corpo e os erros vêm como { erro }.
+const paraEstoque = (p) => ({
+  id: p.id, produtoId: p.id, quantidadeFisica: p.fisica, quantidadeReservada: p.reservada, estoqueMinimo: p.minimo,
+  produto: { id: p.id, nome: p.nome, codigoBarras: p.codigoBarras },
+});
+
+const paraMovimentacao = (m) => ({
+  ...m,
+  produto: { id: m.produtoId, nome: produtos.find((x) => x.id === m.produtoId)?.nome ?? '' },
+  usuario: { id: m.usuarioId, nome: usuarios.find((x) => x.id === m.usuarioId)?.nome ?? '' },
+});
+
+rota('GET', '/estoque', () => ({ corpo: [...produtos].sort((a, b) => a.id - b.id).map(paraEstoque) }));
+
+rota('GET', '/estoque/(\\d+)', (req, body, p) => {
+  const produto = produtos.find((x) => x.id === Number(p[1]));
+  if (!produto) throw new ErroSimples(404, 'Estoque não encontrado para esse produto');
+  return { corpo: paraEstoque(produto) };
+});
+
+rota('PUT', '/estoque/(\\d+)', (req, body, p) => {
+  const minimo = Number(body?.estoqueMinimo);
+  if (Number.isNaN(minimo) || minimo < 0) throw new ErroSimples(400, 'estoqueMinimo é obrigatório e não pode ser negativo');
+  const produto = produtos.find((x) => x.id === Number(p[1]));
+  if (!produto) throw new ErroSimples(404, 'Estoque não encontrado para esse produto');
+  produto.minimo = minimo;
+  return { corpo: paraEstoque(produto) };
+});
+
+rota('POST', '/movimentacoes', (req, body) => {
+  const b = body ?? {};
+  const produtoId = Number(b.produtoId);
+  const usuarioId = Number(b.usuarioId);
+  const quantidade = Number(b.quantidade);
+  const { tipo, motivo } = b;
+  if (!produtoId || !usuarioId || !tipo || Number.isNaN(quantidade)) throw new ErroSimples(400, 'produtoId, usuarioId, tipo e quantidade são obrigatórios');
+  if (!['ENTRADA', 'SAIDA', 'PERDA', 'AJUSTE'].includes(tipo)) throw new ErroSimples(400, 'tipo inválido, use um de: ENTRADA, SAIDA, PERDA, AJUSTE');
+  if (tipo === 'AJUSTE') {
+    if (quantidade === 0) throw new ErroSimples(400, 'quantidade do ajuste não pode ser zero');
+  } else if (quantidade <= 0) throw new ErroSimples(400, 'quantidade deve ser maior que zero');
+
+  const produto = produtos.find((x) => x.id === produtoId);
+  if (!produto || !usuarios.some((u) => u.id === usuarioId)) throw new ErroSimples(500, 'Erro ao registrar movimentação'); // chave estrangeira inválida
+  const delta = tipo === 'SAIDA' || tipo === 'PERDA' ? -quantidade : quantidade;
+  const nova = produto.fisica + delta;
+  if (nova < 0) throw new ErroSimples(400, 'Estoque insuficiente para essa saída/perda');
+
+  const movimentacao = { id: proximoId(movimentacoes), produtoId, usuarioId, tipo, quantidade, motivo: motivo || null, criadoEm: new Date().toISOString() };
+  movimentacoes.push(movimentacao);
+  produto.fisica = nova;
+  return { status: 201, corpo: movimentacao };
+});
+
+rota('GET', '/movimentacoes', (req, body, p, q) => {
+  const produtoId = q.get('produtoId');
+  const lista = movimentacoes.filter((m) => !produtoId || m.produtoId === Number(produtoId));
+  return { corpo: [...lista].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm) || b.id - a.id).map(paraMovimentacao) };
+});
+
+rota('DELETE', '/movimentacoes/(\\d+)', (req, body, p) => {
+  const id = Number(p[1]);
+  const indice = movimentacoes.findIndex((m) => m.id === id);
+  if (indice === -1) throw new ErroSimples(404, 'Movimentação não encontrada');
+  const mov = movimentacoes[indice];
+  const delta = mov.tipo === 'ENTRADA' ? -mov.quantidade : mov.tipo === 'SAIDA' || mov.tipo === 'PERDA' ? mov.quantidade : -mov.quantidade;
+  const produto = produtos.find((x) => x.id === mov.produtoId);
+  if (produto) produto.fisica = Math.max(0, produto.fisica + delta);
+  movimentacoes.splice(indice, 1);
+  return { status: 204 };
+});
+
 /* ---------- Servidor ---------- */
 
 function lerCorpo(req) {
@@ -513,6 +601,10 @@ function lerCorpo(req) {
 }
 
 const enviar = (res, status, corpo) => {
+  if (status === 204) {
+    res.writeHead(204);
+    return res.end();
+  }
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(corpo));
 };
@@ -533,6 +625,10 @@ http
       }
       throw new ApiErro(404, `Rota não encontrada: ${req.method} ${url.pathname}`);
     } catch (erro) {
+      if (erro instanceof ErroSimples) {
+        console.log(`${req.method} ${url.pathname}${url.search} -> ${erro.status} (${erro.message})`);
+        return enviar(res, erro.status, { erro: erro.message });
+      }
       if (erro instanceof ApiErro) {
         console.log(`${req.method} ${url.pathname}${url.search} -> ${erro.status} (${erro.message})`);
         return enviar(res, erro.status, { mensagem: erro.message, campo: erro.campo });
