@@ -1,4 +1,4 @@
-import type { CanalPedido, FormaPagamento, Perfil, StatusPagamento, StatusPedido } from '../types';
+import type { CanalPedido, FormaPagamento, Perfil, StatusPagamento, StatusPedido, TipoMovimentacao } from '../types';
 
 export type Tom = 'neutro' | 'verde' | 'laranja' | 'vermelho' | 'azul' | 'amarelo';
 
@@ -82,3 +82,23 @@ export const STATUS_PAGAMENTO_TOM: Record<StatusPagamento, Tom> = {
   EXPIRADO: 'neutro',
   ESTORNADO: 'vermelho',
 };
+
+export const TIPO_MOV_ROTULO: Record<TipoMovimentacao, string> = {
+  ENTRADA: 'Entrada',
+  SAIDA: 'Saída',
+  PERDA: 'Perda',
+  AJUSTE: 'Ajuste',
+};
+
+export const TIPO_MOV_TOM: Record<TipoMovimentacao, Tom> = {
+  ENTRADA: 'verde',
+  SAIDA: 'azul',
+  PERDA: 'vermelho',
+  AJUSTE: 'amarelo',
+};
+
+// Efeito da movimentação no estoque físico (mesma regra do backend):
+// ENTRADA soma, SAÍDA e PERDA subtraem, AJUSTE soma o valor informado (que pode ser negativo).
+export function deltaMovimentacao(tipo: TipoMovimentacao, quantidade: number): number {
+  return tipo === 'SAIDA' || tipo === 'PERDA' ? -quantidade : quantidade;
+}

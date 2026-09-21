@@ -97,3 +97,28 @@ export interface ErroApi {
   mensagem: string;
   campo?: string;
 }
+
+export type TipoMovimentacao = 'ENTRADA' | 'SAIDA' | 'PERDA' | 'AJUSTE';
+
+// GET /estoque: uma linha por produto.
+export interface Estoque {
+  id: number;
+  produtoId: number;
+  quantidadeFisica: number;
+  quantidadeReservada: number;
+  estoqueMinimo: number;
+  produto: { id: number; nome: string; codigoBarras: string | null };
+}
+
+// GET /movimentacoes
+export interface Movimentacao {
+  id: number;
+  produtoId: number;
+  usuarioId: number;
+  tipo: TipoMovimentacao;
+  quantidade: number;
+  motivo: string | null;
+  criadoEm: string;
+  produto: { id: number; nome: string };
+  usuario: { id: number; nome: string };
+}

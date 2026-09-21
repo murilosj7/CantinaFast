@@ -52,10 +52,12 @@ export function lerErro(erro: unknown): ErroLido {
     if (!erro.response) {
       return { mensagem: 'Não foi possível conectar ao servidor. Verifique se a API está no ar.' };
     }
-    const dados: Partial<ErroApi> =
+    // A maior parte da API responde { mensagem, campo? }; o módulo de estoque responde { erro }.
+    const dados: Partial<ErroApi> & { erro?: string } =
       typeof erro.response.data === 'object' && erro.response.data !== null ? erro.response.data : {};
     const status = erro.response.status;
-    if (dados.mensagem) return { mensagem: dados.mensagem, campo: dados.campo, status };
+    const texto = dados.mensagem ?? dados.erro;
+    if (texto) return { mensagem: texto, campo: dados.campo, status };
     if (status >= 500) return { mensagem: 'O servidor não respondeu como esperado. Verifique se a API está no ar.', status };
     return { mensagem: 'Erro inesperado. Tente novamente.', status };
   }
