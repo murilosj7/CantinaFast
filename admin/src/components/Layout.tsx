@@ -15,12 +15,13 @@ const ITENS: ItemMenu[] = [
   { para: '/pedidos/novo', rotulo: 'Novo pedido' },
   { para: '/pedidos', rotulo: 'Pedidos' },
   { para: '/produtos', rotulo: 'Produtos' },
+  { para: '/estoque', rotulo: 'Estoque' },
   { para: '/categorias', rotulo: 'Categorias' },
   { para: '/usuarios', rotulo: 'Usuários', perfis: ['administrador'] },
 ];
 
 // Áreas previstas na documentação que ainda não têm página.
-const EM_BREVE = ['Estoque', 'Despesas', 'Fornecedores', 'BI', 'Financeiro', 'Fiscal', 'Sincronização', 'Backup', 'Configurações'];
+const EM_BREVE = ['Despesas', 'Fornecedores', 'BI', 'Financeiro', 'Fiscal', 'Sincronização', 'Backup', 'Configurações'];
 
 export function Layout() {
   const { usuario, sair } = useAuth();
