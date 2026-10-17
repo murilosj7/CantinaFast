@@ -154,7 +154,13 @@ L.executar(t, async () => {
     await t.caso('token válido funciona (200 em /interno/me)', async () => t.sucesso(await me(adm.token)));
 
     // ---- rate limit do login (limite 5)
-    // Limite do login: só tentativas FALHAS contam (skipSuccessfulRequests); a 6ª falha em 15 minutos recebe 429, por IP.
+    // Limite do login interno: a chave é IP + login (nunca só o IP). Só tentativas FALHAS contam (skipSuccessfulRequests); a 6ª
+    // falha do MESMO login no MESMO IP em 15 minutos recebe 429. Outros logins do mesmo IP seguem livres.
+    // CENÁRIO DA CANTINA: o IP é compartilhado, então várias pessoas errando (cada uma o seu login) não podem travar ninguém.
+    await t.caso('CANTINA: 60 falhas de logins DISTINTOS (1 cada) no mesmo IP não bloqueiam ninguém: o login correto do administrador → 200 em seguida', async () => {
+      for (let i = 0; i < 60; i++) L.erro(await login({ login: t.unico('fantasma'), senha: 'errada' }), 401, { mensagem: 'Login ou senha inválidos.' });
+      t.sucesso(await login({ login: adm.login, senha }));
+    });
     await t.caso('login CORRETO não gasta o limite: 8 logins válidos seguidos → todos 200', async () => {
       for (let i = 0; i < 8; i++) t.sucesso(await login({ login: adm.login, senha }));
     });
@@ -176,11 +182,25 @@ L.executar(t, async () => {
       t.verdade(Number(bloq.headers.get('retry-after')) > 0);
       t.eq(bloq.headers.get('x-content-type-options'), 'nosniff');
     });
-    await t.caso('bloqueado: até o login CORRETO recebe 429 (limite por IP)', async () => {
+    await t.caso('bloqueado: até o login CORRETO do MESMO login recebe 429 (o par IP + login está esgotado)', async () => {
       L.erro(await login({ login: adm.login, senha }), 429, { mensagem: MSG_LOGIN_429 });
     });
-    await t.caso('bloqueado: outro usuário no mesmo IP também recebe 429', async () => {
-      L.erro(await login({ login: cx.login, senha }), 429);
+    // Mudou em relação à regra antiga (só por IP): quem está bloqueado é só o par, não o IP inteiro.
+    await t.caso('OUTRO login do mesmo IP NÃO é bloqueado: o login correto → 200 e o errado → 401 (não 429)', async () => {
+      t.sucesso(await login({ login: cx.login, senha }));
+      L.erro(await login({ login: cx.login, senha: 'errada' }), 401, { mensagem: 'Login ou senha inválidos.' });
+    });
+    await t.caso('o login é aparado e compartilha o contador (" login " também 429), mas o login interno DIFERENCIA maiúsculas (outro balde → 401)', async () => {
+      L.erro(await login({ login: `  ${adm.login}  `, senha }), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await login({ login: adm.login.toUpperCase(), senha: 'errada' }), 401, { mensagem: 'Login ou senha inválidos.' });
+    });
+    // Corpo sem login em texto (ausente, número, objeto, nulo) usa o alvo fixo "sem-alvo": só afeta outras requisições malformadas.
+    await t.caso('corpo sem login em texto → 400 (não derruba o servidor); a 6ª requisição malformada → 429, e o login legítimo segue livre', async () => {
+      const ruins = [{ senha: 'x' }, { login: 7, senha: 'x' }, { login: { a: 1 }, senha: 'x' }, { login: null, senha: 'x' }, {}];
+      for (const body of ruins) L.erro(await login(body), 400, { mensagem: 'Informe login e senha.' });
+      L.erro(await login({ login: [1], senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
+      t.sucesso(await login({ login: cx.login, senha }));
+      t.sucesso(await t.http('GET', '/health'));
     });
     await t.caso('o bloqueio do login não afeta as outras rotas (GET /health e /interno/me seguem 200)', async () => {
       t.sucesso(await t.http('GET', '/health'));
@@ -190,6 +210,10 @@ L.executar(t, async () => {
       t.sucesso(await t.http('GET', '/categorias'));
     });
 
+    // O express-rate-limit valida a configuração e registra "ERR_ERL_*" no log (chave sem ipKeyGenerator, contagem dupla, trust proxy...).
+    await t.caso('o servidor não registrou nenhum erro de validação do express-rate-limit (ERR_ERL_*) com os limitadores em série', async () => {
+      t.verdade(!srv.log.includes('ERR_ERL'), srv.log);
+    });
     // ---- LOGIN_RATE_LIMIT_MAX: leitura do valor (cada caso reinicia o servidor SÓ com a env do processo)
     await srv.parar(); // a porta é fixa: o servidor da fase cai antes de subir os das sub-fases
     // Conta quantas tentativas erradas passam antes do primeiro 429, para descobrir o limite efetivo.
@@ -223,29 +247,46 @@ L.executar(t, async () => {
   resultados.push(f1);
 
   // ================================================================ FASE 2: geral
-  // Fase geral: 100 requisições por minuto por IP em todas as rotas, exceto POST /interno/login (que tem limitador próprio).
+  // Fase geral: limite geral por IP em todas as rotas comuns, exceto os logins e o cadastro (que têm limitadores próprios).
+  // É o ÚNICO limite só por IP, por isso o teto é altíssimo (só protege contra cliente descontrolado). O número NÃO é fixado
+  // aqui: é lido da política informada pelo servidor (RateLimit-Policy) e o teste manda exatamente esse total.
   const f2 = await fase('geral', { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '' }, async () => {
     const origem = { origin: 'http://localhost:5174' };
+    // Manda `n` GETs a /health em lotes paralelos de 100 e confere que todos passam.
+    const mandar = async (n) => {
+      for (let falta = n; falta > 0; falta -= 100) {
+        const rs = await L.paralelo(Math.min(100, falta), () => t.http('GET', '/health'));
+        t.verdade(rs.every((r) => r.status === 200), `status: ${[...new Set(rs.map((r) => r.status))]}`);
+      }
+    };
     // O polling de /health que sobe o servidor já gasta requisições do limite: parte-se do "remaining" informado pelo servidor.
     let primeira;
     let restantes;
-    await t.caso('a 1ª requisição mostra a política 100/60s nos headers RateLimit (RFC draft-7)', async () => {
+    let teto;
+    await t.caso('a 1ª requisição mostra a política "<teto>;w=60" nos headers RateLimit (RFC draft-7) e o "remaining"', async () => {
       primeira = await t.http('GET', '/health');
       t.eq(primeira.status, 200);
-      t.verdade((primeira.headers.get('ratelimit-policy') || '').startsWith('100;w=60'), primeira.headers.get('ratelimit-policy'));
+      const politica = /^(\d+);w=60/.exec(primeira.headers.get('ratelimit-policy') || '');
+      t.verdade(politica, `ratelimit-policy: ${primeira.headers.get('ratelimit-policy')}`);
+      teto = Number(politica[1]);
       restantes = Number((/remaining=(\d+)/.exec(primeira.headers.get('ratelimit') || '') || [])[1]);
-      t.verdade(Number.isInteger(restantes) && restantes >= 90 && restantes <= 99, `remaining=${restantes}`);
+      t.verdade(Number.isInteger(restantes) && restantes >= 0 && restantes < teto, `remaining=${restantes} teto=${teto}`);
     });
-    await t.caso('exatamente "remaining" requisições seguintes passam (o total da janela é 100) e o contador chega a 0', async () => {
+    // Piso, não valor exato: numa rede compartilhada (escola inteira atrás de um IP) um teto baixo deixa uma pessoa travar todos.
+    await t.caso('o teto geral é alto o bastante para uma rede compartilhada (pelo menos 1000 por minuto por IP)', async () => {
+      t.verdade(teto >= 1000, `teto=${teto}`);
+    });
+    await t.caso('exatamente "remaining" requisições seguintes passam (o total da janela é o teto da política) e o contador chega a 0', async () => {
+      await mandar(Math.max(0, restantes - 3));
       let r;
-      for (let i = 0; i < restantes; i++) {
+      for (let i = 0; i < Math.min(3, restantes); i++) {
         r = await t.http('GET', '/health');
-        t.eq(r.status, 200, `requisição ${i + 1} após a primeira`);
+        t.eq(r.status, 200);
       }
-      t.verdade(/remaining=0/.test(r.headers.get('ratelimit') || ''), r.headers.get('ratelimit'));
+      if (r) t.verdade(/remaining=0/.test(r.headers.get('ratelimit') || ''), r.headers.get('ratelimit'));
     });
     let r101;
-    await t.caso('a requisição seguinte ao limite (a 101ª da janela) → 429 no formato { mensagem }', async () => {
+    await t.caso('a requisição seguinte ao total da janela → 429 no formato { mensagem }', async () => {
       r101 = await bruto('GET', '/health', origem);
       L.erro(r101 && { status: r101.status, body: r101.body, texto: r101.texto }, 429, { mensagem: MSG_GERAL_429, campo: null });
     });
@@ -258,8 +299,11 @@ L.executar(t, async () => {
       L.erro(await t.http('GET', '/categorias'), 429, { mensagem: MSG_GERAL_429 });
       L.erro(await t.http('GET', '/interno/me', { token: adm.token }), 429, { mensagem: MSG_GERAL_429 });
     });
-    await t.caso('o POST /interno/login fica FORA do limite geral (usa só o limitador do login): 401, não 429 geral', async () => {
+    await t.caso('com o geral esgotado, os logins e o cadastro ficam FORA dele: POST /interno/login e POST /clientes/login → 401 próprio; POST /clientes/cadastro → 201', async () => {
       L.erro(await login({ login: adm.login, senha: 'errada' }), 401, { mensagem: 'Login ou senha inválidos.' });
+      L.erro(await t.http('POST', '/clientes/login', { body: { email: `${t.unico('x')}@teste.local`, senha: 'qualquer-1' } }), 401, { mensagem: 'E-mail ou senha inválidos.' });
+      const r = await t.http('POST', '/clientes/cadastro', { body: { nome: 'Geral', email: `${t.unico('geral')}@teste.local`, senha: 'senha-de-teste-1' } });
+      t.eq(r.status, 201, r.texto);
     });
     await t.caso('login correto continua funcionando com o limite geral estourado', async () => {
       t.sucesso(await login({ login: adm.login, senha }));
@@ -421,9 +465,10 @@ L.executar(t, async () => {
   resultados.push(f4);
 
   // ================================================================ FASE 5: clientes
-  // Limites do cliente do site (NODE_ENV=development e LOGIN_RATE_LIMIT_MAX=5 só no processo filho):
-  //  - cadastro: 20 requisições por hora por IP, contando TODA requisição (inclusive as que falham);
-  //  - login do cliente: instância própria do limitador de login (só as falhas contam) e fora do limite geral;
+  // Limites do cliente do site (NODE_ENV=development e LOGIN_RATE_LIMIT_MAX=5 só no processo filho). Princípio: nenhum bloqueio usa só o IP.
+  //  - login: chave IP + e-mail (a 6ª falha do MESMO e-mail no MESMO IP → 429); outros e-mails do mesmo IP seguem livres;
+  //  - cadastro: só cadastros bem-sucedidos contam, teto de 100 por hora por IP; erro de validação e e-mail repetido não gastam;
+  //  - login e cadastro ficam fora do limite geral;
   //  - estourar um dos logins (interno ou cliente) não bloqueia o outro.
   const MSG_CADASTRO_429 = 'Muitos cadastros a partir deste endereço. Tente novamente mais tarde.';
   const senhaCli = crypto.randomBytes(9).toString('hex');
@@ -435,54 +480,79 @@ L.executar(t, async () => {
   };
   const loginCli = (email, s = senhaCli) => t.http('POST', '/clientes/login', { body: { email, senha: s } });
   const cadastroCli = (over = {}) => t.http('POST', '/clientes/cadastro', { body: { nome: 'Cliente Seg', email: `${t.unico('cad')}@teste.local`, senha: senhaCli, ...over } });
+  // Lê o "remaining" do limite geral (a própria chamada a /health gasta 1).
+  const restanteGeral = async () => Number((/remaining=(\d+)/.exec((await t.http('GET', '/health')).headers.get('ratelimit') || '') || [])[1]);
   const f5 = await fase('clientes', { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '' }, async (srv) => {
     const cliA = await mkCliente();
     const cliB = await mkCliente();
-    // ---- cadastro: 20 por hora por IP, contando as requisições que falham
-    let r21;
-    await t.caso('cadastro: 10 requisições inválidas (400) + 10 válidas (201) gastam as 20; a 21ª recebe 429 mesmo sendo válida', async () => {
-      for (let i = 0; i < 10; i++) L.erro(await cadastroCli({ nome: '' }), 400, { campo: 'nome' });
-      for (let i = 0; i < 10; i++) t.sucesso(await cadastroCli(), 201);
-      r21 = await cadastroCli();
-      L.erro(r21, 429, { mensagem: MSG_CADASTRO_429, campo: null });
+    const cliC = await mkCliente();
+    // ---- cadastro: só os SUCESSOS contam (teto de 100 por hora por IP)
+    let geralAntes;
+    await t.caso('cadastro: 30 requisições que FALHAM (20 inválidas + 10 com e-mail repetido) NÃO gastam o limite', async () => {
+      geralAntes = await restanteGeral();
+      const repetido = `${t.unico('dup')}@teste.local`;
+      t.sucesso(await cadastroCli({ email: repetido }), 201); // o 1º sucesso (1 de 100)
+      for (let i = 0; i < 20; i++) L.erro(await cadastroCli({ nome: '' }), 400, { campo: 'nome' });
+      for (let i = 0; i < 10; i++) L.erro(await cadastroCli({ email: repetido }), 409, { campo: 'email' });
     });
-    await t.caso('o 429 do cadastro traz Retry-After, a política 20/hora e os headers do helmet', async () => {
-      t.verdade(Number(r21.headers.get('retry-after')) > 0);
-      t.verdade((r21.headers.get('ratelimit-policy') || '').startsWith('20;w=3600'), r21.headers.get('ratelimit-policy'));
-      t.eq(r21.headers.get('x-content-type-options'), 'nosniff');
+    await t.caso('mais 99 cadastros VÁLIDOS → todos 201 (com o 1º são 100 sucessos, o teto da janela)', async () => {
+      for (let lote = 0; lote < 9; lote++) {
+        const rs = await t.paralelo(11, () => cadastroCli());
+        t.verdade(rs.every((r) => r.status === 201), `status: ${rs.map((r) => r.status)}`);
+      }
     });
-    await t.caso('cadastro bloqueado: as próximas tentativas seguem em 429 e NENHUMA conta nova é criada', async () => {
+    let r101;
+    await t.caso('o 101º cadastro válido → 429 { mensagem } (30 falhas e 100 sucessos: só os sucessos contaram)', async () => {
+      r101 = await cadastroCli();
+      L.erro(r101, 429, { mensagem: MSG_CADASTRO_429, campo: null });
+    });
+    await t.caso('o 429 do cadastro traz Retry-After, a política 100/hora e os headers do helmet', async () => {
+      t.verdade(Number(r101.headers.get('retry-after')) > 0);
+      t.verdade((r101.headers.get('ratelimit-policy') || '').startsWith('100;w=3600'), r101.headers.get('ratelimit-policy'));
+      t.eq(r101.headers.get('x-content-type-options'), 'nosniff');
+    });
+    // O cadastro fica fora do limite geral: as 131 requisições acima não podem ter gastado o contador geral.
+    await t.caso('o limite GERAL não interfere no cadastro: as 131 requisições de cadastro não gastaram o contador geral', async () => {
+      const depois = await restanteGeral();
+      t.verdade(geralAntes - depois <= 3, `geral antes=${geralAntes} depois=${depois}`);
+    });
+    await t.caso('cadastro bloqueado: as próximas tentativas seguem em 429 e NENHUMA conta nova é criada; login e demais rotas seguem normais', async () => {
       const antes = await t.prisma.cliente.count({ where: { email: { startsWith: t.prefixo } } });
       L.erro(await cadastroCli(), 429, { mensagem: MSG_CADASTRO_429 });
       t.eq(await t.prisma.cliente.count({ where: { email: { startsWith: t.prefixo } } }), antes);
-    });
-    await t.caso('o limite do cadastro não bloqueia o login do cliente nem outras rotas', async () => {
       t.sucesso(await loginCli(cliA.email));
       t.sucesso(await t.http('GET', '/categorias'));
     });
-    // ---- login do cliente fora do limite GERAL (100/min): esgota o geral e confere que o login ainda passa
-    await t.caso('o limite geral (100/min) se esgota em rotas comuns (429 com a mensagem do limite geral)', async () => {
-      let r;
-      for (let i = 0; i < 150; i++) {
-        r = await t.http('GET', '/health');
-        if (r.status === 429) break;
+    // ---- limite GERAL esgotado: lê o teto da política, manda exatamente o total e a seguinte é 429
+    await t.caso('o limite geral se esgota em rotas comuns: manda exatamente o total da política e a seguinte → 429 geral', async () => {
+      const r0 = await t.http('GET', '/health');
+      const restantes = Number((/remaining=(\d+)/.exec(r0.headers.get('ratelimit') || '') || [])[1]);
+      t.verdade(Number.isInteger(restantes), r0.headers.get('ratelimit'));
+      for (let falta = restantes; falta > 0; falta -= 100) {
+        const rs = await t.paralelo(Math.min(100, falta), () => t.http('GET', '/health'));
+        t.verdade(rs.every((r) => r.status === 200), `status: ${[...new Set(rs.map((r) => r.status))]}`);
       }
-      L.erro(r, 429, { mensagem: MSG_GERAL_429 });
+      L.erro(await t.http('GET', '/health'), 429, { mensagem: MSG_GERAL_429 });
     });
-    // Só login correto aqui: o correto não gasta o limite do login, então o contador das 5 falhas segue zerado para os casos abaixo.
-    await t.caso('POST /clientes/login fica FORA do limite geral: com o geral esgotado, o login correto ainda → 200 (não 429 geral)', async () => {
+    await t.caso('com o geral esgotado: POST /clientes/login fica fora (200) e o cadastro devolve o 429 DO CADASTRO, não o do geral', async () => {
       t.sucesso(await loginCli(cliB.email));
+      L.erro(await cadastroCli(), 429, { mensagem: MSG_CADASTRO_429 });
     });
     await t.caso('o limite geral continua valendo para as demais rotas do cliente (GET /clientes/me → 429 geral)', async () => {
       const tok = t.sucesso(await loginCli(cliB.email)).token;
       L.erro(await t.http('GET', '/clientes/me', { token: tok }), 429, { mensagem: MSG_GERAL_429 });
     });
-    // ---- limite do login do cliente (5 falhas por IP)
+    // ---- login do cliente: chave IP + e-mail
+    // CENÁRIO DA ESCOLA: o IP é compartilhado; muitos alunos errando a senha (cada um a sua) não podem travar ninguém.
+    await t.caso('ESCOLA: 60 falhas de e-mails DISTINTOS (1 cada) do mesmo IP não bloqueiam nada: o login correto de outro aluno → 200 em seguida', async () => {
+      for (let i = 0; i < 60; i++) L.erro(await loginCli(`${t.unico('fantasma')}@teste.local`, 'errada-1'), 401, { mensagem: 'E-mail ou senha inválidos.' });
+      t.sucesso(await loginCli(cliC.email));
+    });
     await t.caso('login CORRETO do cliente não gasta o limite: 8 logins válidos seguidos → todos 200', async () => {
       for (let i = 0; i < 8; i++) t.sucesso(await loginCli(cliA.email));
     });
     let bloq;
-    await t.caso('as 5 primeiras tentativas ERRADAS do cliente → 401 (com a política 5 nos headers RateLimit)', async () => {
+    await t.caso('as 5 primeiras tentativas ERRADAS do mesmo e-mail → 401 (com a política 5 nos headers RateLimit)', async () => {
       let r;
       for (let i = 0; i < 5; i++) {
         r = await loginCli(cliA.email, `errada-${i}`);
@@ -490,18 +560,39 @@ L.executar(t, async () => {
       }
       t.verdade((r.headers.get('ratelimit-policy') || '').startsWith('5;'), r.headers.get('ratelimit-policy'));
     });
-    await t.caso('o 6º login errado do cliente → 429 { mensagem } com Retry-After', async () => {
+    await t.caso('o 6º login errado do MESMO e-mail no mesmo IP → 429 { mensagem } com Retry-After', async () => {
       bloq = await loginCli(cliA.email, 'errada-5');
       L.erro(bloq, 429, { mensagem: MSG_LOGIN_429, campo: null });
       t.verdade(Number(bloq.headers.get('retry-after')) > 0);
     });
-    await t.caso('bloqueado: até o login CORRETO do cliente recebe 429 (limite por IP), inclusive de outro cliente', async () => {
+    await t.caso('bloqueado o par: até o login CORRETO desse e-mail recebe 429, inclusive com outra capitalização e espaços (mesmo contador)', async () => {
       L.erro(await loginCli(cliA.email), 429, { mensagem: MSG_LOGIN_429 });
-      L.erro(await loginCli(cliB.email), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await loginCli(`  ${cliA.email.toUpperCase()}  `), 429, { mensagem: MSG_LOGIN_429 });
     });
-    await t.caso('estourar o limite do login do CLIENTE não bloqueia o login INTERNO (contadores separados)', async () => {
+    // Mudou em relação à regra antiga (só por IP): outro e-mail do mesmo IP NÃO é afetado.
+    await t.caso('e-mail DIFERENTE do mesmo IP não é afetado: login correto → 200 e errado → 401 (não 429)', async () => {
+      t.sucesso(await loginCli(cliB.email));
+      L.erro(await loginCli(cliB.email, 'errada-0'), 401, { mensagem: 'E-mail ou senha inválidos.' });
+    });
+    await t.caso('e-mail INEXISTENTE gasta o próprio contador igual ao existente (não revela se a conta existe): 5 erros → 401 e a 6ª → 429', async () => {
+      const fantasma = `${t.unico('naoexiste')}@teste.local`;
+      for (let i = 0; i < 5; i++) L.erro(await loginCli(fantasma, `errada-${i}`), 401, { mensagem: 'E-mail ou senha inválidos.' });
+      L.erro(await loginCli(fantasma, 'errada-5'), 429, { mensagem: MSG_LOGIN_429 });
+    });
+    // Corpo sem e-mail em texto usa o alvo fixo "sem-alvo": só afeta outras requisições malformadas, nunca logins legítimos.
+    await t.caso('corpo sem e-mail / e-mail numérico / objeto / nulo → 400 (não derruba o servidor); a 6ª malformada → 429; login legítimo segue livre', async () => {
+      const ruins = [{ senha: 'x' }, { email: 7, senha: 'x' }, { email: { a: 1 }, senha: 'x' }, { email: null, senha: 'x' }, {}];
+      for (const body of ruins) L.erro(await t.http('POST', '/clientes/login', { body }), 400, { mensagem: 'Informe e-mail e senha.' });
+      L.erro(await t.http('POST', '/clientes/login', { body: { email: [1], senha: 'x' } }), 429, { mensagem: MSG_LOGIN_429 });
+      t.sucesso(await loginCli(cliC.email));
+      t.sucesso(await t.http('POST', '/interno/login', { body: { login: adm.login, senha } }));
+    });
+    await t.caso('estourar o login do CLIENTE não bloqueia o login INTERNO (contadores separados)', async () => {
       L.erro(await login({ login: adm.login, senha: 'errada' }), 401, { mensagem: 'Login ou senha inválidos.' });
       t.sucesso(await login({ login: adm.login, senha }));
+    });
+    await t.caso('o servidor não registrou erros de validação do express-rate-limit (ERR_ERL_*) com os limitadores do cliente em série', async () => {
+      t.verdade(!srv.log.includes('ERR_ERL'), srv.log);
     });
   });
   // O contrário: estourar o login INTERNO não bloqueia o login do cliente. Servidor novo (contadores zerados).

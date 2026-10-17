@@ -10,7 +10,7 @@ import { prisma } from "./config/prisma";
 import { errorHandler, rotaNaoEncontrada } from "./middlewares/errorHandler";
 // Limitadores de requisições por IP: o do login (LOGIN_RATE_LIMIT_MAX falhas/15 min, padrão 5; uma instância para o login interno e outra
 // para o do cliente), o do cadastro de cliente (20/hora) e um geral (100/min).
-import { limitadorCadastro, limitadorGeral, limitadorLogin, limitadorLoginCliente } from "./middlewares/rateLimit";
+import { limitadorCadastro, limitadorGeral, limitadoresLoginCliente, limitadoresLoginInterno } from "./middlewares/rateLimit";
 // Opções do CORS (allowlist de origens vinda de CORS_ALLOWED_ORIGINS no .env).
 import { opcoesCors } from "./config/cors";
 // Importa o conjunto de rotas de cada módulo (cada um mora na sua pasta em src/modules).
@@ -36,7 +36,8 @@ app.use(helmet());
 // "preflight" (OPTIONS) do navegador.
 app.use(cors(opcoesCors));
 
-// Segurança 3a: limite geral de 100 requisições por minuto por IP (o POST /interno/login tem limitador próprio e fica de fora).
+// Segurança 3a: limite geral de 3000 requisições por minuto por IP, só contra cliente descontrolado (os logins e o cadastro têm
+// limitadores próprios e ficam de fora). É o único limite só por IP, por isso o teto é altíssimo: a escola compartilha o IP.
 app.use(limitadorGeral);
 
 // Ensina o Express a ler o corpo (body) das requisições em JSON e colocá-lo em req.body.
@@ -50,17 +51,19 @@ app.get("/health", async (req, res) => {
   res.json({ status: "ok", totalUsuarios });
 });
 
-// Segurança 3b: limite rígido só para tentativas de login (LOGIN_RATE_LIMIT_MAX falhas por IP a cada 15 min, padrão 5). Vem ANTES das rotas de auth.
-app.post("/interno/login", limitadorLogin);
+// Segurança 3b: limites do login interno, em série e ANTES das rotas de auth: teto de 100 falhas por login (todos os IPs) e, por último,
+// LOGIN_RATE_LIMIT_MAX falhas (padrão 5) por IP + login a cada 15 min. Chave sempre IP + alvo, nunca só o IP. Leem req.body (express.json acima).
+app.post("/interno/login", ...limitadoresLoginInterno);
 // /interno/login e /interno/me são resolvidos pelas rotas do módulo de autenticação.
 app.use("/interno", authRoutes);
 // Tudo que começar com /interno/usuarios é resolvido pelas rotas do módulo de usuário.
 app.use("/interno/usuarios", usuarioRoutes);
 // Tudo que começar com /interno/clientes (gestão de clientes pelo administrador) é resolvido pelas rotas internas do módulo de cliente.
 app.use("/interno/clientes", clienteInternoRoutes);
-// Segurança 3c: limites do cliente do site, ANTES das rotas de /clientes: login (instância própria, mesmas regras do login interno)
-// e cadastro (20 por hora por IP, conta toda requisição).
-app.post("/clientes/login", limitadorLoginCliente);
+// Segurança 3c: limites do cliente do site, ANTES das rotas de /clientes: login (instâncias próprias, mesmas regras do login interno:
+// teto de 100 falhas por e-mail e, por último, o par IP + e-mail) e cadastro (100 cadastros bem-sucedidos por hora por IP;
+// falhas de validação e e-mail repetido não contam).
+app.post("/clientes/login", ...limitadoresLoginCliente);
 app.post("/clientes/cadastro", limitadorCadastro);
 // Tudo que começar com /clientes (cadastro, login e /me do cliente) é resolvido pelas rotas do módulo de cliente.
 app.use("/clientes", clienteRoutes);
