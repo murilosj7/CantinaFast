@@ -664,6 +664,36 @@ L.executar(t, async () => {
       for (let i = 1; i <= 6; i++) status.push((await loginCliIp(`10.99.0.${i}, 203.0.113.9`, c.email)).status);
       t.eq(status, [401, 401, 401, 401, 401, 429]);
     });
+    // UM IP SOZINHO NÃO PODE TRAVAR UM ALVO PARA OS OUTROS. O teto por alvo (100 falhas, todos os IPs) existe para o ataque
+    // DISTRIBUÍDO (20 IPs ou mais, cada um limitado a 5 pelo par). Se o teto contasse também as requisições que o par já barrou
+    // (429), um único IP com ~100 tentativas esgotaria o teto e bloquearia o alvo para todo mundo por até 15 minutos
+    // (por exemplo, o login do administrador). Por isso o teto só pode contar o que o par deixou passar.
+    await t.caso('UM IP SOZINHO (150 tentativas erradas no mesmo e-mail) não trava o alvo: outro IP entra (200) e outro e-mail do mesmo IP segue livre (401)', async () => {
+      const alvo = await mkCliente();
+      const outro = await mkCliente();
+      let barradas = 0;
+      for (let i = 0; i < 150; i++) {
+        const r = await loginCliIp('10.70.0.1', alvo.email);
+        if (r.status === 429) barradas++;
+        else t.eq(r.status, 401);
+      }
+      t.eq(barradas, 145); // 5 passam pelo par, as 145 seguintes são barradas pelo par
+      t.sucesso(await loginCliIp('10.70.0.2', alvo.email, senhaCli));
+      L.erro(await loginCliIp('10.70.0.1', outro.email), 401, { mensagem: 'E-mail ou senha inválidos.' });
+    });
+    await t.caso('UM IP SOZINHO (150 tentativas erradas no mesmo login) não trava o login interno: outro IP entra (200) e outro login do mesmo IP segue livre (401)', async () => {
+      const alvo = await mk('CAIXA');
+      const outro = await mk('CAIXA');
+      let barradas = 0;
+      for (let i = 0; i < 150; i++) {
+        const r = await loginIntIp('10.71.0.1', alvo.login);
+        if (r.status === 429) barradas++;
+        else t.eq(r.status, 401);
+      }
+      t.eq(barradas, 145);
+      t.sucesso(await loginIntIp('10.71.0.2', alvo.login, senha));
+      L.erro(await loginIntIp('10.71.0.1', outro.login), 401, { mensagem: 'Login ou senha inválidos.' });
+    });
     // Teto por alvo (todos os IPs): 20 IPs × 5 falhas no MESMO e-mail somam 100. O IP seguinte, mesmo novo, recebe 429.
     await t.caso('TETO por e-mail: 20 IPs × 5 falhas no MESMO e-mail → o próximo IP NOVO recebe 429; um e-mail diferente segue livre', async () => {
       const alvo = await mkCliente();
@@ -671,7 +701,12 @@ L.executar(t, async () => {
       for (let ip = 1; ip <= 20; ip++) {
         for (let k = 0; k < 5; k++) L.erro(await loginCliIp(`10.40.${ip}.1`, alvo.email), 401);
       }
-      L.erro(await loginCliIp('10.40.99.1', alvo.email), 429, { mensagem: MSG_LOGIN_429 });
+      const rTeto = await loginCliIp('10.40.99.1', alvo.email);
+      L.erro(rTeto, 429, { mensagem: MSG_LOGIN_429 });
+      // O teto vem DEPOIS do par e sem cabeçalhos RateLimit-*: a política que o cliente vê continua a do par ("5;w=900"),
+      // mas o Retry-After do teto é escrito à mão.
+      t.verdade(Number(rTeto.headers.get('retry-after')) > 0, 'sem Retry-After no 429 do teto');
+      t.verdade((rTeto.headers.get('ratelimit-policy') || '').startsWith('5;'), rTeto.headers.get('ratelimit-policy'));
       // Contrapartida aceita da defesa distribuída: até o login CORRETO desse e-mail, de um IP novo, fica bloqueado por até 15 min.
       L.erro(await loginCliIp('10.40.98.1', alvo.email, senhaCli), 429, { mensagem: MSG_LOGIN_429 });
       // Outro e-mail, mesmo IP novo: livre.

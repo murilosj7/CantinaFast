@@ -39,9 +39,10 @@ export function lerLimiteLogin(valor: string | undefined): number {
 // Limite de tentativas de login (por IP + alvo) lido uma vez, na subida do servidor.
 const limiteLogin = lerLimiteLogin(process.env.LOGIN_RATE_LIMIT_MAX);
 
-// Teto de falhas de login por ALVO (e-mail ou login) somando TODOS os IPs, a cada 15 minutos. Só dispara quando o mesmo alvo
-// é atacado de muitos IPs distintos (cada IP só pode errar `limiteLogin` vezes por alvo, então são necessários 20 IPs ou mais
-// com o limite padrão): é a defesa contra ataque distribuído. Um aluno digitando errado, ou uma sala inteira errando a senha
+// Teto de falhas de login por ALVO (e-mail ou login) somando TODOS os IPs, a cada 15 minutos. O teto só conta as requisições
+// que o limitador do par IP + alvo DEIXOU PASSAR (cada IP passa no máximo `limiteLogin` vezes por alvo), então só dispara quando o
+// mesmo alvo é atacado de muitos IPs distintos: são necessários pelo menos LIMITE_TETO_POR_ALVO / limiteLogin IPs (20 com o limite
+// padrão). Um único IP, por mais que insista, nunca esgota o teto: é a defesa contra ataque DISTRIBUÍDO. Um aluno digitando errado, ou uma sala inteira errando a senha
 // de colegas diferentes, nunca chega perto. Contrapartida aceita: um atacante com muitos IPs consegue travar o login de UM
 // alvo específico por até 15 minutos.
 const LIMITE_TETO_POR_ALVO = 100;
@@ -72,12 +73,15 @@ function alvoLogin(req: Request): string {
   return normalizado === "" ? ALVO_AUSENTE : normalizado;
 }
 
-// Cria os DOIS limitadores de um login, para usar em SÉRIE (o teto por alvo primeiro, o do par por último):
-//  1) teto por alvo em todos os IPs: LIMITE_TETO_POR_ALVO falhas por alvo (defesa contra ataque distribuído);
-//  2) par IP + alvo: `limiteLogin` falhas (padrão 5) do mesmo IP contra o mesmo alvo. É o que protege a senha de uma conta
-//     sem punir ninguém além de quem está errando.
-// Em ambos só as tentativas FALHAS contam (2xx não gasta) e a janela é de 15 minutos. O do par fica por último de propósito:
-// o último limitador a rodar é quem escreve os cabeçalhos RateLimit-* (a política "5;w=900" que o cliente vê).
+// Cria os DOIS limitadores de um login, para usar em SÉRIE, NESTA ORDEM (devolvidos já ordenados):
+//  1) par IP + alvo (primeiro): `limiteLogin` falhas (padrão 5) do mesmo IP contra o mesmo alvo. É o que protege a senha de uma
+//     conta sem punir ninguém além de quem está errando;
+//  2) teto por alvo em todos os IPs (por último): LIMITE_TETO_POR_ALVO falhas por alvo (defesa contra ataque distribuído).
+// A ORDEM importa: uma requisição barrada pelo par (429) não chama o próximo limitador, então o teto só conta o que o par deixou
+// passar. Com o teto primeiro, as requisições barradas pelo par também gastariam o teto (429 não é sucesso e não é devolvida) e
+// um único IP com ~100 tentativas esgotaria o teto e travaria o alvo para todos os IPs por até 15 minutos.
+// Em ambos só as tentativas FALHAS contam (2xx não gasta) e a janela é de 15 minutos. Só o do par escreve os cabeçalhos
+// RateLimit-* (a política "5;w=900" que o cliente vê); o teto vem sem cabeçalhos para não os sobrescrever e põe só o Retry-After.
 // Cada chamada cria instâncias com contadores PRÓPRIOS: estourar o login interno não bloqueia o do cliente, e vice-versa.
 function criarLimitadoresLogin(prefixoPar: string, prefixoTeto: string, alvo: (req: Request) => string) {
   // Configuração comum aos dois limitadores.
@@ -97,19 +101,27 @@ function criarLimitadoresLogin(prefixoPar: string, prefixoTeto: string, alvo: (r
       res.status(429).json({ mensagem: "Muitas tentativas de login. Tente novamente em alguns minutos." });
     },
   };
-  // Teto por alvo, somando todos os IPs.
-  const tetoPorAlvo = rateLimit({
-    ...comum,
-    limit: LIMITE_TETO_POR_ALVO,
-    keyGenerator: (req) => `${prefixoTeto}${alvo(req)}`,
-  });
   // Par IP + alvo. O IP passa pelo ipKeyGenerator (IPv6 agrupado) para não dar para escapar trocando de endereço.
   const porPar = rateLimit({
     ...comum,
     limit: limiteLogin,
     keyGenerator: (req) => `${prefixoPar}${ipKeyGenerator(req.ip ?? "sem-ip")}:${alvo(req)}`,
   });
-  return [tetoPorAlvo, porPar];
+  // Teto por alvo, somando todos os IPs. Sem cabeçalhos RateLimit-* (standardHeaders: false) para não sobrescrever os do par.
+  const tetoPorAlvo = rateLimit({
+    ...comum,
+    standardHeaders: false,
+    limit: LIMITE_TETO_POR_ALVO,
+    keyGenerator: (req) => `${prefixoTeto}${alvo(req)}`,
+    // Sem standardHeaders o limitador não escreve o Retry-After; calcula aqui, a partir do fim da janela, para o cliente saber quando voltar.
+    handler: (req: Request, res: Response) => {
+      const fimDaJanela = (req as Request & { rateLimit?: { resetTime?: Date } }).rateLimit?.resetTime;
+      if (fimDaJanela) res.setHeader("Retry-After", String(Math.max(1, Math.ceil((fimDaJanela.getTime() - Date.now()) / 1000))));
+      res.status(429).json({ mensagem: "Muitas tentativas de login. Tente novamente em alguns minutos." });
+    },
+  });
+  // Ordem: par primeiro, teto por último (veja o comentário da função).
+  return [porPar, tetoPorAlvo];
 }
 
 // Login interno: aplicado só em POST /interno/login (server.ts). Chaves "int-login:" (teto) e "int-par:" (par).

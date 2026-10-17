@@ -60,8 +60,9 @@ app.get("/health", async (req, res) => {
   res.json({ status: "ok", totalUsuarios });
 });
 
-// Segurança 3b: limites do login interno, em série e ANTES das rotas de auth: teto de 100 falhas por login (todos os IPs) e, por último,
-// LOGIN_RATE_LIMIT_MAX falhas (padrão 5) por IP + login a cada 15 min. Chave sempre IP + alvo, nunca só o IP. Leem req.body (express.json acima).
+// Segurança 3b: limites do login interno, em série e ANTES das rotas de auth: primeiro LOGIN_RATE_LIMIT_MAX falhas (padrão 5) por IP + login
+// a cada 15 min e, por último, o teto de 100 falhas por login (todos os IPs), que só conta o que o par deixou passar (um IP sozinho nunca
+// o esgota). Chave de bloqueio sempre IP + alvo, nunca só o IP. Leem req.body (express.json acima).
 app.post("/interno/login", ...limitadoresLoginInterno);
 // /interno/login e /interno/me são resolvidos pelas rotas do módulo de autenticação.
 app.use("/interno", authRoutes);
@@ -69,8 +70,8 @@ app.use("/interno", authRoutes);
 app.use("/interno/usuarios", usuarioRoutes);
 // Tudo que começar com /interno/clientes (gestão de clientes pelo administrador) é resolvido pelas rotas internas do módulo de cliente.
 app.use("/interno/clientes", clienteInternoRoutes);
-// Segurança 3c: limites do cliente do site, ANTES das rotas de /clientes: login (instâncias próprias, mesmas regras do login interno:
-// teto de 100 falhas por e-mail e, por último, o par IP + e-mail) e cadastro (100 cadastros bem-sucedidos por hora por IP;
+// Segurança 3c: limites do cliente do site, ANTES das rotas de /clientes: login (instâncias próprias, mesmas regras e mesma ordem do
+// login interno: primeiro o par IP + e-mail e, por último, o teto de 100 falhas por e-mail) e cadastro (100 cadastros bem-sucedidos por hora por IP;
 // falhas de validação e e-mail repetido não contam).
 app.post("/clientes/login", ...limitadoresLoginCliente);
 app.post("/clientes/cadastro", limitadorCadastro);
