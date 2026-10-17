@@ -423,6 +423,64 @@ L.executar(t, async () => {
     ]);
     t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
   });
+  // Testes DETERMINÍSTICOS (sem depender de sorte): o próprio teste segura, numa transação, o lock da linha do
+  // administrador A. Isso congela as requisições exatamente no ponto da trava e permite forçar a ordem dos eventos.
+  // `segurar(aoLiberar)` devolve { liberar, concluida }; `aoLiberar(tx)` roda DENTRO da transação do teste, ainda com o lock.
+  const segurar = async (aoLiberar) => {
+    let liberar;
+    const portao = new Promise((r) => (liberar = r));
+    let travou;
+    const pronto = new Promise((r) => (travou = r));
+    const concluida = t.prisma.$transaction(async (db) => {
+      await db.$queryRaw`SELECT id FROM "usuarios" WHERE id = ${adm.id} FOR UPDATE`;
+      travou();
+      await portao;
+      if (aoLiberar) await aoLiberar(db);
+    }, { timeout: 30000, maxWait: 10000 });
+    await pronto;
+    return { liberar, concluida };
+  };
+  // Resolve com 'pendente' se a requisição ainda não terminou depois de `ms`; senão devolve a resposta.
+  const aguardar = (req, ms = 700) => Promise.race([req, t.dormir(ms).then(() => 'pendente')]);
+  await t.caso('TRAVA: com o lock do administrador A segurado por outra transação, inativar B FICA ESPERANDO e termina depois da liberação', async () => {
+    await reiniciar();
+    const s = await segurar();
+    const req = inativaB();
+    t.eq(await aguardar(req), 'pendente', 'a inativação não deveria terminar enquanto o administrador ativo está travado');
+    s.liberar();
+    await s.concluida;
+    t.eq((await req).status, 200); // A continua ativo, então B pode ser inativado
+    await reiniciar();
+  });
+  await t.caso('TRAVA: o rebaixamento (PATCH perfil) também espera pelo lock; PATCH só de nome NÃO espera', async () => {
+    await reiniciar();
+    const s = await segurar();
+    const rebaixa = rebaixaB();
+    const soNome = patch(adm2.id, { nome: 'Sem trava' }, adm.token);
+    t.eq((await aguardar(soNome)).status, 200, 'editar só o nome não deve esperar pela trava');
+    t.eq(await aguardar(rebaixa), 'pendente', 'o rebaixamento deveria esperar pela trava');
+    s.liberar();
+    await s.concluida;
+    t.eq((await rebaixa).status, 200);
+    await reiniciar();
+  });
+  // Leitura velha determinística: B é lido como atendente fora da transação; enquanto a requisição espera pela trava,
+  // o teste promove B a administrador e inativa A. A decisão tem de usar o estado RELIDO de B (administrador, último
+  // ativo) e responder 409; com a leitura velha, B seria inativado e o sistema ficaria sem administrador.
+  await t.caso('LEITURA VELHA: alvo lido como atendente e promovido a administrador enquanto espera a trava → a regra usa o estado relido (409, sobra 1 administrador)', async () => {
+    await reiniciar('ATENDENTE');
+    const s = await segurar(async (db) => {
+      await db.usuario.update({ where: { id: adm2.id }, data: { perfil: 'ADMINISTRADOR' } });
+      await db.usuario.update({ where: { id: adm.id }, data: { ativo: false } });
+    });
+    const req = patch(adm2.id, { ativo: false }, adm.token);
+    t.eq(await aguardar(req), 'pendente');
+    s.liberar();
+    await s.concluida;
+    L.erro(await req, 409, { contem: 'último administrador' });
+    t.eq(await administradoresAtivos(), 1);
+    await reiniciar();
+  });
   await t.caso('as disputas não deixam travas penduradas: depois delas a regra segue respondendo 200/409 normalmente', async () => {
     await reiniciar();
     t.eq(t.sucesso(await inativar(adm2.id, adm.token)).ativo, false);
