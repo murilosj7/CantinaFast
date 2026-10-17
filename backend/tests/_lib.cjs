@@ -244,6 +244,8 @@ function suite(nome) {
       await prisma.estoque.deleteMany({ where: { produtoId: { in: ps } } });
       await prisma.produto.deleteMany({ where: { id: { in: ps } } });
       await prisma.categoria.deleteMany({ where: { nome: { startsWith: prefixo } } });
+      // Clientes criados pela suíte (e-mail começa com o prefixo); os pedidos que os referenciam já foram apagados acima.
+      await prisma.cliente.deleteMany({ where: { email: { startsWith: prefixo, mode: 'insensitive' } } });
       await prisma.usuario.deleteMany({ where: { id: { in: us } } });
     },
 

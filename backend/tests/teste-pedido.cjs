@@ -394,11 +394,14 @@ L.executar(t, async () => {
     const r = t.sucesso(await pedir([item(pA)], 'ONLINE'), 201);
     t.eq(r.usuarioId, adm.id);
   });
-  // [DIVERGE-PDF] D7 — a entidade Cliente ainda não existe; clienteId é um inteiro solto.
-  await t.diverge('clienteId é sempre null: a entidade Cliente ainda não existe (sem FK, sem rota)', async () => {
-    t.eq(ped.clienteId, null);
-    const tabelas = await t.prisma.$queryRaw`SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name ILIKE '%cliente%'`;
-    t.eq(tabelas.length, 0);
+  // [DIVERGE-PDF] D7 — a entidade Cliente e a FK pedidos.clienteId existem, mas o vínculo no pedido ainda não foi feito:
+  // criarPedido ignora clienteId do corpo e o pedido não tem nome_contato/telefone_contato (visitante).
+  await t.diverge('criarPedido ignora clienteId (pedido nunca é vinculado a um cliente) e o pedido não tem nome_contato/telefone_contato', async () => {
+    const cliente = await t.prisma.cliente.create({ data: { nome: 'Cliente do teste', email: `${t.prefixo}d7@teste.local` } });
+    const r = t.sucesso(await t.http('POST', '/pedidos', { token: adm.token, body: { canal: 'ONLINE', clienteId: cliente.id, itens: [item(pA)] } }), 201);
+    t.eq(r.clienteId, null);
+    t.eq((await t.prisma.pedido.findUnique({ where: { id: r.id } })).clienteId, null);
+    t.verdade(!('nomeContato' in r) && !('telefoneContato' in r));
   });
   // [DIVERGE-PDF] D13 — PDF: quantidade NUMERIC(12,3).
   await t.diverge('quantidade do item só inteira (PDF: NUMERIC(12,3))', async () => {

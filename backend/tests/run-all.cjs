@@ -26,7 +26,7 @@ const SUITES = [
   { nome: 'seed', servidor: false },
   { nome: 'seguranca', servidor: false }, // sobe o próprio servidor em cada fase
 ];
-const TABELAS = ['usuario', 'categoria', 'produto', 'estoque', 'movimentacaoEstoque', 'pedido', 'itemPedido', 'pagamento'];
+const TABELAS = ['usuario', 'cliente', 'categoria', 'produto', 'estoque', 'movimentacaoEstoque', 'pedido', 'itemPedido', 'pagamento'];
 
 // Só o nome gerado por ESTE runner pode ser apagado (trava do DROP DATABASE).
 let nomeBancoTeste = null; // só o nome gerado por este runner pode ser apagado
