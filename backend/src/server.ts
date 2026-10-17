@@ -8,8 +8,9 @@ import cors from "cors";
 import { prisma } from "./config/prisma";
 // Importa o middleware de erro genérico e o tratador de rota inexistente (404).
 import { errorHandler, rotaNaoEncontrada } from "./middlewares/errorHandler";
-// Limitadores de requisições por IP: um específico do login (LOGIN_RATE_LIMIT_MAX falhas/15 min, padrão 5) e um geral (100/min).
-import { limitadorGeral, limitadorLogin } from "./middlewares/rateLimit";
+// Limitadores de requisições por IP: o do login (LOGIN_RATE_LIMIT_MAX falhas/15 min, padrão 5; uma instância para o login interno e outra
+// para o do cliente), o do cadastro de cliente (20/hora) e um geral (100/min).
+import { limitadorCadastro, limitadorGeral, limitadorLogin, limitadorLoginCliente } from "./middlewares/rateLimit";
 // Opções do CORS (allowlist de origens vinda de CORS_ALLOWED_ORIGINS no .env).
 import { opcoesCors } from "./config/cors";
 // Importa o conjunto de rotas de cada módulo (cada um mora na sua pasta em src/modules).
@@ -21,6 +22,8 @@ import { estoqueRoutes } from "./modules/produto/estoque.routes";
 import { movimentacaoRoutes } from "./modules/movimentacao/movimentacao.routes";
 import { pedidoRoutes } from "./modules/pedido/pedido.routes";
 import { pagamentoRoutes } from "./modules/pagamento/pagamento.routes";
+import { clienteRoutes } from "./modules/cliente/cliente.routes";
+import { clienteInternoRoutes } from "./modules/cliente/clienteInterno.routes";
 
 // Cria a aplicação Express: é ela que recebe todas as requisições.
 const app = express();
@@ -53,6 +56,14 @@ app.post("/interno/login", limitadorLogin);
 app.use("/interno", authRoutes);
 // Tudo que começar com /interno/usuarios é resolvido pelas rotas do módulo de usuário.
 app.use("/interno/usuarios", usuarioRoutes);
+// Tudo que começar com /interno/clientes (gestão de clientes pelo administrador) é resolvido pelas rotas internas do módulo de cliente.
+app.use("/interno/clientes", clienteInternoRoutes);
+// Segurança 3c: limites do cliente do site, ANTES das rotas de /clientes: login (instância própria, mesmas regras do login interno)
+// e cadastro (20 por hora por IP, conta toda requisição).
+app.post("/clientes/login", limitadorLoginCliente);
+app.post("/clientes/cadastro", limitadorCadastro);
+// Tudo que começar com /clientes (cadastro, login e /me do cliente) é resolvido pelas rotas do módulo de cliente.
+app.use("/clientes", clienteRoutes);
 // Tudo que começar com /categorias é resolvido pelas rotas do módulo de categoria.
 app.use("/categorias", categoriaRoutes);
 // Tudo que começar com /produtos é resolvido pelas rotas do módulo de produto.
