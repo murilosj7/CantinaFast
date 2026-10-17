@@ -356,20 +356,82 @@ L.executar(t, async () => {
 
   // Corrida: dois administradores se inativando ao mesmo tempo. A checagem de "último administrador" não é
   // atômica (count + update sem trava), então as duas requisições podem passar e deixar o sistema SEM administrador.
-  // BUG REAL: a checagem do último administrador (count + update) não é atômica. Duas inativações simultâneas
-  // passam juntas e o sistema fica sem administrador. O caso afirma o comportamento CORRETO; enquanto o bug existir ele é
-  // contado como 'bug conhecido' no quadro, sem reprovar a suíte.
-  await t.bug('inativações simultâneas de 2 administradores nunca deixam 0 administradores ativos', async () => {
-    await t.prisma.usuario.updateMany({ where: { perfil: 'ADMINISTRADOR', ativo: true, id: { notIn: [adm.id, adm2.id] } }, data: { ativo: false } });
+  // Regra do último administrador sob concorrência. A decisão é tomada dentro de uma transação que trava (FOR UPDATE, em
+  // ordem de id) os administradores ativos, relê o alvo e só então confere se sobra outro administrador. Cada caso abaixo
+  // repete a disputa 10 vezes (a corrida é probabilística) e afirma que sempre sobra pelo menos 1 administrador ativo.
+  // Os tokens são de A e B; se um deles for inativado no meio, as requisições seguintes podem dar 401, o que não muda a regra.
+  const RODADAS = 10;
+  // Deixa só A e B como administradores ativos do banco (os demais desta suíte ficam inativos).
+  await t.prisma.usuario.updateMany({ where: { perfil: 'ADMINISTRADOR', ativo: true, id: { notIn: [adm.id, adm2.id] } }, data: { ativo: false } });
+  const reiniciar = (perfilB = 'ADMINISTRADOR') => Promise.all([
+    t.prisma.usuario.update({ where: { id: adm.id }, data: { perfil: 'ADMINISTRADOR', ativo: true } }),
+    t.prisma.usuario.update({ where: { id: adm2.id }, data: { perfil: perfilB, ativo: true } }),
+  ]);
+  const administradoresAtivos = () => t.prisma.usuario.count({ where: { perfil: 'ADMINISTRADOR', ativo: true, login: { startsWith: t.prefixo } } });
+  // Executa a disputa `RODADAS` vezes e devolve em quantas o sistema ficou sem administrador ativo.
+  const corrida = async (perfilB, operacoes) => {
     let zerou = 0;
-    for (let rodada = 0; rodada < 5; rodada++) {
-      await t.prisma.usuario.updateMany({ where: { id: { in: [adm.id, adm2.id] } }, data: { ativo: true } });
-      await t.paralelo(2, (i) => inativar(i === 0 ? adm.id : adm2.id, i === 0 ? adm2.token : adm.token));
-      const ativos = await t.prisma.usuario.count({ where: { perfil: 'ADMINISTRADOR', ativo: true, login: { startsWith: t.prefixo } } });
-      if (ativos === 0) zerou++;
+    for (let rodada = 0; rodada < RODADAS; rodada++) {
+      await reiniciar(perfilB);
+      await t.paralelo(operacoes.length, (i) => operacoes[i]());
+      if ((await administradoresAtivos()) === 0) zerou++;
     }
-    await t.prisma.usuario.updateMany({ where: { id: { in: [adm.id, adm2.id] } }, data: { ativo: true } });
-    t.eq(zerou, 0, `em ${zerou}/5 rodadas os dois administradores foram inativados e não sobrou nenhum`);
+    await reiniciar();
+    return zerou;
+  };
+  // Atalhos: A e B agem com o token do outro para as chamadas poderem ser simultâneas.
+  const inativaA = () => inativar(adm.id, adm2.token);
+  const inativaB = () => inativar(adm2.id, adm.token);
+  const rebaixaA = () => patch(adm.id, { perfil: 'caixa' }, adm2.token);
+  const rebaixaB = () => patch(adm2.id, { perfil: 'caixa' }, adm.token);
+  await t.caso('CORRIDA: duas inativações simultâneas (A e B) nunca deixam 0 administradores ativos (10 rodadas)', async () => {
+    const zerou = await corrida('ADMINISTRADOR', [inativaA, inativaB]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  await t.caso('CORRIDA: dois rebaixamentos de perfil simultâneos via PATCH (A e B → caixa) nunca deixam 0 administradores (10 rodadas)', async () => {
+    const zerou = await corrida('ADMINISTRADOR', [rebaixaA, rebaixaB]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  await t.caso('CORRIDA: duas inativações via PATCH {ativo:false} simultâneas nunca deixam 0 administradores (10 rodadas)', async () => {
+    const zerou = await corrida('ADMINISTRADOR', [() => patch(adm.id, { ativo: false }, adm2.token), () => patch(adm2.id, { ativo: false }, adm.token)]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  await t.caso('CORRIDA mista: um inativa (A) enquanto o outro é rebaixado (B → caixa) nunca deixa 0 administradores (10 rodadas)', async () => {
+    const zerou = await corrida('ADMINISTRADOR', [inativaA, rebaixaB]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  await t.caso('CORRIDA mista invertida: B inativa enquanto A é rebaixado (10 rodadas)', async () => {
+    const zerou = await corrida('ADMINISTRADOR', [inativaB, rebaixaA]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  // Leitura velha: B é lido como atendente fora da transação e é promovido a administrador por outra requisição no meio.
+  // Se a decisão usasse essa leitura, "inativar B" não seria checada e "inativar A" contaria B como administrador:
+  // os dois passariam e o sistema ficaria sem administrador.
+  await t.caso('CORRIDA: promover B a administrador + inativar B + inativar A ao mesmo tempo sempre deixa pelo menos 1 administrador (10 rodadas)', async () => {
+    const zerou = await corrida('ATENDENTE', [
+      () => patch(adm2.id, { perfil: 'administrador' }, adm.token),
+      () => patch(adm2.id, { ativo: false }, adm.token),
+      () => inativar(adm.id, adm.token),
+    ]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  await t.caso('CORRIDA: variante com a rota dedicada inativar para B, promoção de B e inativação de A (10 rodadas)', async () => {
+    const zerou = await corrida('ATENDENTE', [
+      () => patch(adm2.id, { perfil: 'administrador' }, adm.token),
+      () => inativar(adm2.id, adm.token),
+      () => inativar(adm.id, adm.token),
+    ]);
+    t.eq(zerou, 0, `em ${zerou}/${RODADAS} rodadas não sobrou nenhum administrador ativo`);
+  });
+  await t.caso('as disputas não deixam travas penduradas: depois delas a regra segue respondendo 200/409 normalmente', async () => {
+    await reiniciar();
+    t.eq(t.sucesso(await inativar(adm2.id, adm.token)).ativo, false);
+    L.erro(await inativar(adm.id, adm.token), 409, { contem: 'último administrador' });
+    await reiniciar();
+  });
+  await t.caso('PATCH só de nome/senha em administrador não passa pela trava e funciona normalmente (200)', async () => {
+    t.sucesso(await patch(adm.id, { nome: 'Admin Renomeado 2' }));
+    t.sucesso(await patch(adm.id, { senha: 'novaSenha77' }));
   });
   // [DIVERGE-PDF] D15 — o PDF exige auditoria de alterações de usuários; a entidade Auditoria não existe.
   await t.diverge('inativação/edição de usuário não gera registro de auditoria (PDF exige rastreabilidade; entidade Auditoria não existe)', async () => {

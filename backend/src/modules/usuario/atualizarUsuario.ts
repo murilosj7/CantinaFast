@@ -11,7 +11,7 @@ import { AppError } from "../../middlewares/errorHandler";
 // Valida o id que veio na URL.
 import { parseId } from "../../utils/parseId";
 // Regra de negócio: impede tirar o último administrador ativo.
-import { garantirUltimoAdministrador } from "./garantirUltimoAdministrador";
+import { garantirUltimoAdministrador, travarAdministradoresAtivos } from "./garantirUltimoAdministrador";
 // lerPerfil valida/converte o perfil; paraUsuarioInterno monta a resposta do contrato.
 import { lerPerfil, paraUsuarioInterno } from "./usuario.mapper";
 
@@ -75,16 +75,31 @@ export async function atualizarUsuario(req: Request, res: Response) {
     throw new AppError("Informe ao menos um campo para atualizar: nome, senha, perfil ou ativo.");
   }
 
-  // Confere a regra do último administrador comparando o estado ANTES com o estado DEPOIS da mudança.
-  await garantirUltimoAdministrador(usuario, {
-    // Perfil final: o novo (se veio) ou o que já era.
-    perfil: (data.perfil as typeof usuario.perfil | undefined) ?? usuario.perfil,
-    // Ativo final: o novo (se veio) ou o que já era.
-    ativo: (data.ativo as boolean | undefined) ?? usuario.ativo,
-  });
+  // Só perfil e ativo podem tirar um administrador. Decidido pelo CORPO da requisição (nunca pela leitura de fora da
+  // transação, que pode estar velha): nome e senha não têm efeito sobre a regra e dispensam a trava.
+  const podeAfetarAdministrador = perfil !== undefined || ativo !== undefined;
 
-  // Aplica a atualização no banco, sem trazer o senhaHash.
-  const atualizado = await prisma.usuario.update({ where: { id }, data, omit: { senhaHash: true } });
+  // Tudo numa transação: travar, reler, conferir a regra e gravar.
+  const atualizado = await prisma.$transaction(async (tx) => {
+    if (podeAfetarAdministrador) {
+      // 1º) trava os administradores ativos (ordem fixa de id). Nunca travar o alvo antes disso (risco de deadlock).
+      await travarAdministradoresAtivos(tx);
+      // 2º) relê o alvo já com a trava: o estado de antes da mudança é este, não o lido lá em cima.
+      const atual = await tx.usuario.findUnique({ where: { id } });
+      if (!atual) {
+        throw new AppError("Usuário não encontrado.", 404);
+      }
+      // Confere a regra comparando o estado ANTES com o estado DEPOIS da mudança.
+      await garantirUltimoAdministrador(tx, atual, {
+        // Perfil final: o novo (se veio) ou o que já era.
+        perfil: (data.perfil as typeof atual.perfil | undefined) ?? atual.perfil,
+        // Ativo final: o novo (se veio) ou o que já era.
+        ativo: (data.ativo as boolean | undefined) ?? atual.ativo,
+      });
+    }
+    // Aplica a atualização no banco, sem trazer o senhaHash.
+    return tx.usuario.update({ where: { id }, data, omit: { senhaHash: true } });
+  });
   // Devolve o usuário já atualizado no formato do contrato.
   res.json(paraUsuarioInterno(atualizado));
 }
