@@ -1,0 +1,6 @@
+node_modules
+/generated/prisma
+.env
+.vscode/
+contrato-api-cantinafast.md
+CLAUDE.md
