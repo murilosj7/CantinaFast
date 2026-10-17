@@ -220,6 +220,20 @@ function suite(nome) {
         },
       });
     },
+    // Cliente do site criado direto no banco (senha aleatória, e-mail com o prefixo da suíte) + token obtido pelo login real.
+    async cliente({ ativo = true, nome = 'Cliente do teste', telefone = null, comSenha = true } = {}) {
+      const senha = crypto.randomBytes(9).toString('hex');
+      const email = `${unico('c')}@teste.local`;
+      const c = await prisma.cliente.create({
+        data: { nome, email, telefone, ativo, senhaHash: comSenha ? await bcrypt.hash(senha, 4) : null },
+      });
+      let token;
+      if (ativo && comSenha) {
+        const r = await http('POST', '/clientes/login', { body: { email, senha } });
+        token = sucesso(r).token;
+      }
+      return { id: c.id, email, senha, token };
+    },
     saldo: (produtoId) => prisma.estoque.findUnique({ where: { produtoId } }),
     contarMov: (produtoId) => prisma.movimentacaoEstoque.count({ where: { produtoId } }),
     // Token forjado com o segredo real (para testar expiração etc.).
@@ -249,7 +263,10 @@ function suite(nome) {
       await prisma.produto.deleteMany({ where: { id: { in: ps } } });
       await prisma.categoria.deleteMany({ where: { nome: { startsWith: prefixo } } });
       // Clientes criados pela suíte (e-mail começa com o prefixo); os pedidos que os referenciam já foram apagados acima.
-      await prisma.cliente.deleteMany({ where: { email: { startsWith: prefixo, mode: 'insensitive' } } });
+      // Contas só com login Google (sem e-mail) são marcadas pelo prefixo no loginGoogle.
+      await prisma.cliente.deleteMany({
+        where: { OR: [{ email: { startsWith: prefixo, mode: 'insensitive' } }, { loginGoogle: { startsWith: prefixo } }] },
+      });
       await prisma.usuario.deleteMany({ where: { id: { in: us } } });
     },
 

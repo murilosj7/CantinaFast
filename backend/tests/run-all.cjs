@@ -17,6 +17,7 @@ const SUITES = [
   { nome: 'categoria', servidor: true },
   { nome: 'usuario', servidor: true },
   { nome: 'auth', servidor: true },
+  { nome: 'cliente', servidor: true },
   { nome: 'produto', servidor: true },
   { nome: 'estoque', servidor: true },
   { nome: 'pedido', servidor: true },
