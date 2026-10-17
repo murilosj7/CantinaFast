@@ -33,7 +33,9 @@ L.executar(t, async () => {
     t.eq(p.id, adm.id);
     t.eq(p.perfil, 'ADMINISTRADOR');
     t.eq(p.exp - p.iat, 8 * 3600);
-    t.eq(Object.keys(p).sort(), ['exp', 'iat', 'id', 'perfil']);
+    t.eq(Object.keys(p).sort(), ['aud', 'exp', 'iat', 'id', 'perfil', 'tipo']);
+    // Claims que separam o token do usuário interno do token do cliente do site.
+    t.eq([p.tipo, p.aud], ['usuario', 'interno']);
   });
   await t.caso('token não carrega senha nem hash', async () => {
     t.verdade(!Buffer.from(resp.token.split('.')[1], 'base64url').toString().toLowerCase().includes('senha'));

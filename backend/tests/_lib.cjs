@@ -223,8 +223,12 @@ function suite(nome) {
     saldo: (produtoId) => prisma.estoque.findUnique({ where: { produtoId } }),
     contarMov: (produtoId) => prisma.movimentacaoEstoque.count({ where: { produtoId } }),
     // Token forjado com o segredo real (para testar expiração etc.).
+    // Por padrão acrescenta as claims do usuário interno (tipo "usuario", aud "interno"), como o login real emite.
+    // O payload pode sobrescrever tipo/aud (ex.: token de cliente); `opcoes.semTipo` emite um token sem essas claims
+    // (formato antigo) e `opcoes.jwt` repassa opções ao jwt.sign (expiresIn, notBefore...).
     assinar(payload, opcoes = {}) {
-      return jwt.sign(payload, opcoes.secret || process.env.JWT_SECRET, { algorithm: 'HS256', ...opcoes.jwt });
+      const claims = opcoes.semTipo ? payload : { tipo: 'usuario', aud: 'interno', ...payload };
+      return jwt.sign(claims, opcoes.secret || process.env.JWT_SECRET, { algorithm: 'HS256', ...opcoes.jwt });
     },
 
     // Remove só o que esta suíte criou (tudo com o prefixo único).

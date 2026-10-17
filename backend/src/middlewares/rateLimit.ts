@@ -31,15 +31,46 @@ const limiteLogin = lerLimiteLogin(process.env.LOGIN_RATE_LIMIT_MAX);
 // Em qualquer outro ambiente (dev, produção) os limites estão SEMPRE ligados.
 const desligado = process.env.NODE_ENV === "test";
 
-// Login: no máximo LOGIN_RATE_LIMIT_MAX (padrão 5) tentativas FALHAS por IP a cada 15 minutos. Aplicado só em POST /interno/login (server.ts).
-export const limitadorLogin = rateLimit({
-  // Janela de 15 minutos (em milissegundos).
-  windowMs: 15 * 60 * 1000,
-  // Até `limiteLogin` tentativas na janela; a seguinte recebe 429.
-  limit: limiteLogin,
-  // Login que deu certo (2xx) NÃO conta: só as tentativas erradas gastam o limite, então quem digita certo nunca é barrado.
-  skipSuccessfulRequests: true,
-  // Informa o limite e o que resta nos cabeçalhos padrão RateLimit-* (e Retry-After ao estourar).
+// Cria um limitador de login: no máximo LOGIN_RATE_LIMIT_MAX (padrão 5) tentativas FALHAS por IP a cada 15 minutos.
+// Cada chamada cria uma instância com contador PRÓPRIO: o login interno e o login do cliente têm a mesma regra, mas
+// estourar o limite de um não bloqueia o outro.
+function criarLimitadorLogin() {
+  return rateLimit({
+    // Janela de 15 minutos (em milissegundos).
+    windowMs: 15 * 60 * 1000,
+    // Até `limiteLogin` tentativas na janela; a seguinte recebe 429.
+    limit: limiteLogin,
+    // Login que deu certo (2xx) NÃO conta: só as tentativas erradas gastam o limite, então quem digita certo nunca é barrado.
+    skipSuccessfulRequests: true,
+    // Informa o limite e o que resta nos cabeçalhos padrão RateLimit-* (e Retry-After ao estourar).
+    standardHeaders: "draft-7",
+    // Desliga os cabeçalhos antigos X-RateLimit-*.
+    legacyHeaders: false,
+    // Nos testes automatizados não limita.
+    skip: () => desligado,
+    // Resposta ao estourar: 429 no mesmo formato de erro do resto da API ({ mensagem }).
+    handler: (_req, res) => {
+      res.status(429).json({ mensagem: "Muitas tentativas de login. Tente novamente em alguns minutos." });
+    },
+  });
+}
+
+// Login interno: aplicado só em POST /interno/login (server.ts).
+export const limitadorLogin = criarLimitadorLogin();
+
+// Login do cliente: instância própria (mesma configuração e mesmo limite), aplicada só em POST /clientes/login (server.ts).
+export const limitadorLoginCliente = criarLimitadorLogin();
+
+// Cadastro de cliente: 20 cadastros por hora por IP. O valor é alto de propósito: a escola compartilha o IP (rede única),
+// então um limite baixo bloquearia alunos legítimos. Conta TODA requisição (inclusive as que falham), porque o objetivo é
+// frear criação em massa de contas. Aplicado só em POST /clientes/cadastro (server.ts); NODE_ENV=test desliga.
+const LIMITE_CADASTRO_POR_HORA = 20;
+export const limitadorCadastro = rateLimit({
+  // Janela de 1 hora.
+  windowMs: 60 * 60 * 1000,
+  // Até 20 requisições na janela; a 21ª recebe 429.
+  limit: LIMITE_CADASTRO_POR_HORA,
+  // Cabeçalhos padrão RateLimit-* (e Retry-After ao estourar).
   standardHeaders: "draft-7",
   // Desliga os cabeçalhos antigos X-RateLimit-*.
   legacyHeaders: false,
@@ -47,7 +78,7 @@ export const limitadorLogin = rateLimit({
   skip: () => desligado,
   // Resposta ao estourar: 429 no mesmo formato de erro do resto da API ({ mensagem }).
   handler: (_req, res) => {
-    res.status(429).json({ mensagem: "Muitas tentativas de login. Tente novamente em alguns minutos." });
+    res.status(429).json({ mensagem: "Muitos cadastros a partir deste endereço. Tente novamente mais tarde." });
   },
 });
 
@@ -61,8 +92,8 @@ export const limitadorGeral = rateLimit({
   standardHeaders: "draft-7",
   // Desliga os cabeçalhos antigos X-RateLimit-*.
   legacyHeaders: false,
-  // Não limita nos testes automatizados; e o login fica de fora porque tem o limitador próprio (mais rígido) acima.
-  skip: (req) => desligado || (req.method === "POST" && req.path === "/interno/login"),
+  // Não limita nos testes automatizados; e os logins (interno e do cliente) ficam de fora porque têm limitador próprio (mais rígido).
+  skip: (req) => desligado || (req.method === "POST" && (req.path === "/interno/login" || req.path === "/clientes/login")),
   // Resposta ao estourar: 429 no mesmo formato de erro do resto da API ({ mensagem }).
   handler: (_req, res) => {
     res.status(429).json({ mensagem: "Muitas requisições. Tente novamente em instantes." });
