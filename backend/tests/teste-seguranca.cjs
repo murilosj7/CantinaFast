@@ -5,6 +5,8 @@
 //   geral      — rate limit geral (100/min por IP)
 //   desativado — NODE_ENV=test: sem rate limit
 //   origens    — CORS_ALLOWED_ORIGINS com lista
+//   clientes   — limites do cliente do site (login por IP + e-mail, cadastro por sucesso, geral fora do login/cadastro)
+//   proxy      — TRUST_PROXY (número exato de proxies da hospedagem) e os tetos por alvo com IPs distintos
 const http = require('http');
 const crypto = require('crypto');
 const L = require('./_lib.cjs');
@@ -52,7 +54,11 @@ L.executar(t, async () => {
 
   // Executa uma fase: sobe o servidor com `env`, roda `fn`, derruba o servidor e registra o placar da fase.
   // Executa uma fase: sobe o servidor com a env da fase (só nesse processo filho), roda os casos e derruba o servidor.
+  // Para depurar ou rodar mutações mais rápido: SEGURANCA_FASES=clientes,proxy roda só essas fases (sem a variável, roda todas).
+  // As sub-fases (ex.: "clientes-limite-3") seguem a fase-mãe (o nome antes do primeiro hífen).
+  const fasesAtivas = process.env.SEGURANCA_FASES ? new Set(process.env.SEGURANCA_FASES.split(',').map((x) => x.trim())) : null;
   async function fase(nome, env, fn) {
+    if (fasesAtivas && !fasesAtivas.has(nome.split('-')[0])) return { nome, ok: 0, falhas: 0 };
     const ok0 = t.placar.ok;
     const f0 = t.placar.falhas;
     console.log(`\n--- fase ${nome} (${Object.entries(env).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')}) ---`);
@@ -619,6 +625,123 @@ L.executar(t, async () => {
   // O quadro mostra tudo isto como uma única fase "clientes".
   const partes = [f5, f5b, ...limites];
   resultados.push({ nome: 'clientes', ok: partes.reduce((s, p) => s + p.ok, 0), falhas: partes.reduce((s, p) => s + p.falhas, 0) });
+
+  // ================================================================ FASE 6: proxy (TRUST_PROXY)
+  // TRUST_PROXY = número EXATO de proxies da hospedagem (inteiro de 1 a 10). Atrás de um proxy o IP real vem no X-Forwarded-For; sem
+  // confiar nele todos teriam o IP do proxy e a chave IP + alvo dos limites não separaria ninguém. Valor inválido (true, 0, listas...)
+  // NÃO confia em nada (avisa no log): forjar o X-Forwarded-For não pode ajudar a escapar dos limites.
+  // Cada requisição deste teste manda o seu X-Forwarded-For (o teste faz o papel do proxy).
+  const xff = (ip) => ({ 'x-forwarded-for': ip });
+  const loginCliIp = (ip, email, s = 'errada-1') => t.http('POST', '/clientes/login', { body: { email, senha: s }, headers: xff(ip) });
+  const loginIntIp = (ip, lg, s = 'errada-1') => t.http('POST', '/interno/login', { body: { login: lg, senha: s }, headers: xff(ip) });
+  // Manda 6 logins errados do MESMO e-mail, cada um com um X-Forwarded-For diferente. Se o cabeçalho for ignorado (nenhuma confiança),
+  // todos têm o mesmo IP e a 6ª é 429; se for honrado, são 6 IPs distintos e nenhuma é 429.
+  const seisComIpsDistintos = async (email) => {
+    const status = [];
+    for (let i = 1; i <= 6; i++) status.push((await loginCliIp(`10.20.0.${i}`, email)).status);
+    return status;
+  };
+  const f6 = await fase('proxy', { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '', TRUST_PROXY: '1' }, async (srv) => {
+    await t.caso('TRUST_PROXY=1 é válida: nenhum aviso no log', async () => {
+      t.verdade(!srv.log.includes('TRUST_PROXY'), srv.log);
+    });
+    await t.caso('com TRUST_PROXY=1 o X-Forwarded-For é honrado: 6 falhas do mesmo e-mail de 6 IPs distintos → nenhuma é 429', async () => {
+      const c = await mkCliente();
+      t.eq(await seisComIpsDistintos(c.email), [401, 401, 401, 401, 401, 401]);
+    });
+    await t.caso('contadores por IP: o MESMO IP repetindo 6 falhas → a 6ª é 429, e outro IP com o mesmo e-mail continua livre', async () => {
+      const c = await mkCliente();
+      for (let i = 0; i < 5; i++) L.erro(await loginCliIp('10.30.0.1', c.email), 401);
+      L.erro(await loginCliIp('10.30.0.1', c.email), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await loginCliIp('10.30.0.2', c.email), 401);
+      t.sucesso(await loginCliIp('10.30.0.2', c.email, senhaCli));
+    });
+    // Com 1 proxy confiável, o IP do cliente é a ENTRADA MAIS À DIREITA (a que o proxy da hospedagem acrescentou). O que o cliente
+    // escreve à esquerda pode ser forjado e não pode mudar o IP usado nos limites.
+    await t.caso('entradas forjadas à esquerda do X-Forwarded-For não mudam o IP: "10.99.0.<n>, 203.0.113.9" ×6 → a 6ª é 429', async () => {
+      const c = await mkCliente();
+      const status = [];
+      for (let i = 1; i <= 6; i++) status.push((await loginCliIp(`10.99.0.${i}, 203.0.113.9`, c.email)).status);
+      t.eq(status, [401, 401, 401, 401, 401, 429]);
+    });
+    // Teto por alvo (todos os IPs): 20 IPs × 5 falhas no MESMO e-mail somam 100. O IP seguinte, mesmo novo, recebe 429.
+    await t.caso('TETO por e-mail: 20 IPs × 5 falhas no MESMO e-mail → o próximo IP NOVO recebe 429; um e-mail diferente segue livre', async () => {
+      const alvo = await mkCliente();
+      const outro = await mkCliente();
+      for (let ip = 1; ip <= 20; ip++) {
+        for (let k = 0; k < 5; k++) L.erro(await loginCliIp(`10.40.${ip}.1`, alvo.email), 401);
+      }
+      L.erro(await loginCliIp('10.40.99.1', alvo.email), 429, { mensagem: MSG_LOGIN_429 });
+      // Contrapartida aceita da defesa distribuída: até o login CORRETO desse e-mail, de um IP novo, fica bloqueado por até 15 min.
+      L.erro(await loginCliIp('10.40.98.1', alvo.email, senhaCli), 429, { mensagem: MSG_LOGIN_429 });
+      // Outro e-mail, mesmo IP novo: livre.
+      L.erro(await loginCliIp('10.40.99.1', outro.email), 401);
+      t.sucesso(await loginCliIp('10.40.99.1', outro.email, senhaCli));
+    });
+    await t.caso('TETO por login interno: 20 IPs × 5 falhas no MESMO login → o próximo IP novo recebe 429; outro login segue livre', async () => {
+      for (let ip = 1; ip <= 20; ip++) {
+        for (let k = 0; k < 5; k++) L.erro(await loginIntIp(`10.50.${ip}.1`, cx.login), 401);
+      }
+      L.erro(await loginIntIp('10.50.99.1', cx.login), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await loginIntIp('10.50.99.1', adm.login), 401);
+      t.sucesso(await loginIntIp('10.50.99.1', adm.login, senha));
+    });
+    await t.caso('o teto do login do cliente e o do login interno são independentes (prefixos "cli-email:" e "int-login:")', async () => {
+      const c = await mkCliente();
+      t.sucesso(await loginCliIp('10.60.0.1', c.email, senhaCli));
+      t.sucesso(await loginIntIp('10.60.0.1', adm.login, senha));
+    });
+    await t.caso('o servidor não registrou erros de validação do express-rate-limit (ERR_ERL_*) com TRUST_PROXY=1', async () => {
+      t.verdade(!srv.log.includes('ERR_ERL'), srv.log);
+    });
+
+    // ---- as demais configurações reiniciam o servidor SÓ com a env do processo (a porta é fixa: o da fase cai antes)
+    await srv.parar();
+    // Ausente ou vazia: nada é confiado, SEM aviso (comportamento de desenvolvimento local). O X-Forwarded-For é ignorado.
+    for (const [rotulo, valor] of [['ausente', undefined], ['vazia', ''], ['só espaços', '   ']]) {
+      await subFase(`TRUST_PROXY ${rotulo}`, { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '', TRUST_PROXY: valor }, async (s) => {
+        await t.caso(`TRUST_PROXY ${rotulo}: sem aviso no log e o X-Forwarded-For é IGNORADO (6 falhas com IPs "diferentes" → a 6ª é 429)`, async () => {
+          t.verdade(!s.log.includes('TRUST_PROXY'), s.log);
+          const c = await mkCliente();
+          t.eq(await seisComIpsDistintos(c.email), [401, 401, 401, 401, 401, 429]);
+        });
+      });
+    }
+    // Inválida: nunca aceita true nem listas; avisa no log e NÃO confia em nada (forjar o X-Forwarded-For não ajuda).
+    for (const valor of ['true', 'false', '0', '-1', '1.5', '1e3', '11', '100', 'abc', '1,2', '1 2', 'loopback', '127.0.0.1', '0x2', '+1']) {
+      await subFase(`TRUST_PROXY=${JSON.stringify(valor)}`, { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '', TRUST_PROXY: valor }, async (s) => {
+        await t.caso(`TRUST_PROXY=${JSON.stringify(valor)} é inválida: avisa no log, não confia em nada e o X-Forwarded-For é ignorado`, async () => {
+          t.verdade(s.log.includes('TRUST_PROXY inválida'), s.log);
+          const c = await mkCliente();
+          t.eq(await seisComIpsDistintos(c.email), [401, 401, 401, 401, 401, 429]);
+        });
+      });
+    }
+    // Válida: inteiro de 1 a 10 em dígitos puros (aparado). Sem aviso; o cabeçalho passa a valer.
+    for (const valor of ['1', ' 1 ', '10', '2']) {
+      await subFase(`TRUST_PROXY=${JSON.stringify(valor)}`, { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '', TRUST_PROXY: valor }, async (s) => {
+        await t.caso(`TRUST_PROXY=${JSON.stringify(valor)} é válida: sem aviso no log e o servidor sobe`, async () => {
+          t.verdade(!s.log.includes('TRUST_PROXY'), s.log);
+          t.sucesso(await t.http('GET', '/health'));
+        });
+        if (valor.trim() === '2') {
+          // Com 2 proxies o IP do cliente é a 2ª entrada contando da direita: "<cliente>, <proxy 1>" (o proxy 2 é o que conectou).
+          await t.caso('TRUST_PROXY=2: o IP é a 2ª entrada da direita — clientes diferentes atrás do mesmo proxy têm contadores separados', async () => {
+            const c = await mkCliente();
+            const status = [];
+            for (let i = 1; i <= 6; i++) status.push((await loginCliIp(`198.51.100.${i}, 203.0.113.9`, c.email)).status);
+            t.eq(status, [401, 401, 401, 401, 401, 401]);
+            // E o mesmo cliente (entrada da esquerda igual) repetindo 6 falhas é bloqueado.
+            const c2 = await mkCliente();
+            const status2 = [];
+            for (let i = 1; i <= 6; i++) status2.push((await loginCliIp('198.51.100.77, 203.0.113.9', c2.email)).status);
+            t.eq(status2, [401, 401, 401, 401, 401, 429]);
+          });
+        }
+      });
+    }
+  });
+  resultados.push(f6);
 
   somarFases([], ...resultados);
   for (const f of resultados) console.log(`FASE ${f.nome}: ${f.ok} ok, ${f.falhas} falhas`);

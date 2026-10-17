@@ -13,6 +13,8 @@ import { errorHandler, rotaNaoEncontrada } from "./middlewares/errorHandler";
 import { limitadorCadastro, limitadorGeral, limitadoresLoginCliente, limitadoresLoginInterno } from "./middlewares/rateLimit";
 // Opções do CORS (allowlist de origens vinda de CORS_ALLOWED_ORIGINS no .env).
 import { opcoesCors } from "./config/cors";
+// Quantos proxies da hospedagem são confiáveis para descobrir o IP real (TRUST_PROXY; indefinido = nenhum).
+import { saltosProxyConfiaveis } from "./config/trustProxy";
 // Importa o conjunto de rotas de cada módulo (cada um mora na sua pasta em src/modules).
 import { authRoutes } from "./modules/auth/auth.routes";
 import { usuarioRoutes } from "./modules/usuario/usuario.routes";
@@ -27,6 +29,13 @@ import { clienteInternoRoutes } from "./modules/cliente/clienteInterno.routes";
 
 // Cria a aplicação Express: é ela que recebe todas as requisições.
 const app = express();
+
+// Proxy reverso: só confia nele quando TRUST_PROXY é válida (inteiro de 1 a 10 = número de proxies da hospedagem). Sem isso, atrás de
+// um proxy todos chegam com o mesmo IP e a chave IP + alvo dos limites não separa ninguém. O número depende da hospedagem e tem de ser
+// EXATO; nunca `true`: com `true` qualquer um forjaria o IP pelo X-Forwarded-For e escaparia dos limites. Vem antes de tudo que lê req.ip.
+if (saltosProxyConfiaveis !== undefined) {
+  app.set("trust proxy", saltosProxyConfiaveis);
+}
 
 // Segurança 1: cabeçalhos de proteção (nosniff, HSTS, X-Frame-Options, CSP etc.) e remove o X-Powered-By. Vem antes de tudo.
 app.use(helmet());
