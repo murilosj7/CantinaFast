@@ -106,11 +106,25 @@ L.executar(t, async () => {
     t.verdade([400, 401, 500].includes(r.status) && r.status !== 0);
     t.sucesso(await t.http('GET', '/health'));
   });
-  // BUG REAL: corpo maior que o limite do express.json (100 kb) devolve 500 'Erro interno'. O correto é 413: o errorHandler
-  // só trata 'entity.parse.failed' e deixa 'entity.too.large' cair no 500.
-  await t.bug('corpo acima do limite (100 kb) devolve 413, não 500', async () => {
-    const r = await login({ login: 'x', senha: 'a'.repeat(200 * 1024) });
-    t.eq(r.status, 413, `veio ${r.status}: ${r.texto}`);
+  // Corpo maior que o limite do express.json (100 kb): 413 no formato { mensagem }, sem cair no 500 genérico.
+  await t.caso('corpo acima do limite (100 kb) em POST /interno/login → 413 { mensagem } (não 500)', async () => {
+    L.erro(await login({ login: 'x', senha: 'a'.repeat(200 * 1024) }), 413, { mensagem: 'Corpo da requisição grande demais.', campo: null });
+  });
+  // O 413 vem do parser de corpo, antes da autenticação e das rotas: vale também para rotas protegidas e com token.
+  await t.caso('corpo grande em rota protegida com token (POST /categorias) → 413 { mensagem }', async () => {
+    L.erro(await t.http('POST', '/categorias', { token: adm.token, body: { nome: 'a'.repeat(200 * 1024) } }), 413, { mensagem: 'Corpo da requisição grande demais.', campo: null });
+  });
+  await t.caso('corpo grande em POST /pedidos autenticado → 413 e nenhum pedido é criado', async () => {
+    const antes = await t.prisma.pedido.count();
+    L.erro(await t.http('POST', '/pedidos', { token: adm.token, body: { canal: 'PRESENCIAL', itens: [{ produtoId: 1, quantidade: 1 }], lixo: 'a'.repeat(200 * 1024) } }), 413, { campo: null });
+    t.eq(await t.prisma.pedido.count(), antes);
+  });
+  await t.caso('corpo grande sem token também é 413 (o limite vale antes da autenticação) e o servidor segue de pé', async () => {
+    L.erro(await t.http('POST', '/produtos', { body: { nome: 'a'.repeat(200 * 1024) } }), 413);
+    t.sucesso(await t.http('GET', '/health'));
+  });
+  await t.caso('corpo exatamente abaixo do limite (~90 kb) passa pelo parser e cai na validação normal (400)', async () => {
+    L.erro(await t.http('POST', '/categorias', { token: adm.token, body: { nome: 'a'.repeat(90 * 1024) } }), 400, { campo: 'nome' });
   });
 
   // ---------------------------------------------------------------- login: credenciais erradas

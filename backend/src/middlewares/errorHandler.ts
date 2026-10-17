@@ -50,6 +50,12 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
 
+  // Corpo maior que o limite do express.json() (100 kb): 413 em vez de cair no 500 genérico.
+  if (err?.type === "entity.too.large") {
+    res.status(413).json({ mensagem: "Corpo da requisição grande demais." });
+    return;
+  }
+
   // Rede de segurança para erros do banco que escaparam das validações do controller.
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     // P2002 = violação de campo único (ex.: login ou código de barras repetido).
