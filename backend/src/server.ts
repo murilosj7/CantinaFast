@@ -54,10 +54,10 @@ app.use(express.json());
 
 // Rota de teste: serve para ver se o servidor e o banco estão de pé.
 app.get("/health", async (req, res) => {
-  // Conta quantos usuários existem; se o banco estiver fora do ar, essa linha dá erro.
-  const totalUsuarios = await prisma.usuario.count();
-  // Responde em JSON com o status e a contagem.
-  res.json({ status: "ok", totalUsuarios });
+  // Consulta mínima ao banco; se ele estiver fora do ar, essa linha dá erro. Não devolve dados (a rota é pública).
+  await prisma.$queryRaw`SELECT 1`;
+  // Responde só com o status.
+  res.json({ status: "ok" });
 });
 
 // Segurança 3b: limites do login interno, em série e ANTES das rotas de auth: primeiro LOGIN_RATE_LIMIT_MAX falhas (padrão 5) por IP + login

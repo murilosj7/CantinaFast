@@ -322,6 +322,9 @@ L.executar(t, async () => {
       t.sucesso(await t.http('GET', rota));
     });
   }
+  await t.caso('GET /health devolve só { status: "ok" } (sem contagem de usuários nem outros dados)', async () => {
+    t.eq(t.sucesso(await t.http('GET', '/health')), { status: 'ok' });
+  });
   await t.caso('rota inexistente → 404 no formato { mensagem } com método e caminho', async () => {
     L.erro(await t.http('GET', '/nao/existe'), 404, { mensagem: 'Rota não encontrada: GET /nao/existe', campo: null });
   });

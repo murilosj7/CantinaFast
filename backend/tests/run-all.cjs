@@ -177,8 +177,10 @@ async function main() {
   console.log(`current_database() confirmado: ${bancoVisto}`);
 
   testePrisma = clienteEm(urlTeste);
-  // Usuário-marcador (inativo, não administrador): permite conferir que o servidor aponta para o banco descartável.
-  await testePrisma.usuario.create({ data: { nome: 'marcador', login: 'cantinafast_test_marker', senhaHash: 'x', perfil: 'ATENDENTE', ativo: false } });
+  // Usuário-marcador (não administrador, senha aleatória): o login dele só funciona se o servidor apontar para o banco descartável.
+  // Nasce ativo para essa conferência e é inativado logo depois (ver abaixo).
+  const senhaMarcador = require('crypto').randomBytes(12).toString('hex');
+  await testePrisma.usuario.create({ data: { nome: 'marcador', login: 'cantinafast_test_marker', senhaHash: require('bcrypt').hashSync(senhaMarcador, 4), perfil: 'ATENDENTE', ativo: true } });
 
   const resultados = [];
   let falhaGeral = false;
@@ -188,12 +190,17 @@ async function main() {
   if (precisaServidor) {
     servidor = await lib.subirServidor(envFilho);
     const h = await lib.http('GET', '/health');
-    if (h.status !== 200 || h.body.totalUsuarios !== 1) {
-      console.error(`ABORTADO: o servidor não está no banco descartável (/health: ${h.texto}).`);
+    // /health não revela dados: o banco é conferido logando com o marcador (existe só no banco descartável).
+    const lg = await lib.http('POST', '/interno/login', { body: { login: 'cantinafast_test_marker', senha: senhaMarcador } });
+    if (h.status !== 200 || lg.status !== 200) {
+      console.error(`ABORTADO: o servidor não está no banco descartável (/health: ${h.texto}; login do marcador: ${lg.status}).`);
       return 2;
     }
-    console.log('Servidor no ar, apontando para o banco descartável (marcador conferido via /health).\n');
+    console.log('Servidor no ar, apontando para o banco descartável (marcador conferido por login).\n');
   }
+
+  // Marcador inativado: some do alcance de qualquer login e mantém o comportamento anterior das suítes.
+  await testePrisma.usuario.updateMany({ where: { login: 'cantinafast_test_marker' }, data: { ativo: false } });
 
   for (const s of escolhidas) {
     if (!s.servidor && servidor) {
