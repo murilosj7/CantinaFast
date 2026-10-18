@@ -134,6 +134,36 @@ L.executar(t, async () => {
       t.verdade(r.saida.includes('não roda com NODE_ENV=production'), r.saida);
       t.eq(await contagens(), antesC);
     });
+    // NODE_ENV com maiúsculas/espaços não escapa da trava.
+    for (const valor of ['Production', ' production ', 'PRODUCTION']) {
+      await t.caso(`seedDemo com NODE_ENV=${JSON.stringify(valor)} também é recusado e não grava nada`, async () => {
+        const antesC = await contagens();
+        const r = rodar('seedDemo.ts', envDemo({ NODE_ENV: valor }));
+        t.eq(r.codigo, 1);
+        t.verdade(r.saida.includes('não roda com NODE_ENV=production'), r.saida);
+        t.eq(await contagens(), antesC);
+      });
+    }
+    // Segunda trava: banco remoto é recusado mesmo com NODE_ENV ausente ou "development".
+    const urlLocal = new URL(process.env.DATABASE_URL);
+    const urlRemota = new URL(process.env.DATABASE_URL);
+    urlRemota.hostname = 'banco-remoto.exemplo.invalid';
+    const casosBanco = [
+      ['banco remoto com NODE_ENV=development', { NODE_ENV: 'development', DATABASE_URL: urlRemota.href }],
+      ['banco remoto com NODE_ENV ausente', { NODE_ENV: undefined, DATABASE_URL: urlRemota.href }],
+      ['DATABASE_URL vazia', { NODE_ENV: 'development', DATABASE_URL: '' }],
+      ['DATABASE_URL ilegível', { NODE_ENV: 'development', DATABASE_URL: 'isto não é uma url' }],
+      ['host só parecido com local (localhost.exemplo.invalid)', { NODE_ENV: 'development', DATABASE_URL: (() => { const u = new URL(urlLocal.href); u.hostname = 'localhost.exemplo.invalid'; return u.href; })() }],
+    ];
+    for (const [rotulo, env] of casosBanco) {
+      await t.caso(`seedDemo recusa ${rotulo} (código 1) e não grava nada`, async () => {
+        const antesC = await contagens();
+        const r = rodar('seedDemo.ts', envDemo(env));
+        t.eq(r.codigo, 1, r.saida);
+        t.verdade(r.saida.includes('só roda em banco local'), r.saida);
+        t.eq(await contagens(), antesC);
+      });
+    }
     // Contagens antes do seedDemo: a diferença prova exatamente o que ele criou.
     const antesDemo = await contagens();
     let saidaDemo;
@@ -179,6 +209,13 @@ L.executar(t, async () => {
       t.eq(await contagens(), antesC);
       t.eq((await t.prisma.estoque.findMany({ orderBy: { id: 'asc' } })).map((e) => e.quantidadeFisica), saldos);
       t.verdade(r.stdout.includes('Concluído: 0 registro(s) criado(s)'), r.stdout);
+    });
+    await t.caso('seedDemo com NODE_ENV ausente em banco local não é barrado pelas travas (a recusa vem só do host)', async () => {
+      const antesC = await contagens();
+      const r = rodar('seedDemo.ts', envDemo({ NODE_ENV: undefined }));
+      t.eq(r.codigo, 0, r.saida);
+      t.verdade(!r.saida.includes('só roda em banco local') && !r.saida.includes('não roda com NODE_ENV'), r.saida);
+      t.eq(await contagens(), antesC);
     });
     await t.caso('seedDemo repetido não troca a senha dos usuários já existentes', async () => {
       const r = rodar('seedDemo.ts', envDemo({ SEED_DEMO_SENHA: 'outra-senha-9' }));

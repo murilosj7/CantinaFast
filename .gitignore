@@ -1,1 +1,8 @@
 ﻿.vscode/
+
+# segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
