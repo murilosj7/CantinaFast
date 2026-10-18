@@ -15,7 +15,7 @@ import { AppError } from "./errorHandler";
 export const MENSAGEM_SESSAO_INVALIDA = "Sessão inválida. Faça login novamente.";
 // Mensagem de token válido, mas do lado errado (cliente em rota interna ou usuário interno em rota de cliente).
 // É a mesma do exigirPerfil: o token é legítimo, só não tem permissão para esta rota.
-export const MENSAGEM_SEM_PERMISSAO = "Você não tem permissão para realizar esta ação.";
+const MENSAGEM_SEM_PERMISSAO = "Você não tem permissão para realizar esta ação.";
 
 // Ensina o TypeScript que, depois destes middlewares, a requisição passa a ter `req.usuario` ou `req.cliente`.
 declare global {

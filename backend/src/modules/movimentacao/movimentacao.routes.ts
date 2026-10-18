@@ -2,7 +2,7 @@
 import { Router } from "express";
 // Middleware que exige token JWT válido.
 import { autenticar, exigirPerfil } from "../../middlewares/auth.middleware";
-import { ADMIN_E_CAIXA, SO_ADMIN } from "../../config/permissoes";
+import { SO_ADMIN, TODOS_INTERNOS } from "../../config/permissoes";
 // Cada ação do módulo mora no seu próprio arquivo; aqui só ligamos cada rota à sua função.
 import { listarMovimentacoes } from "./listarMovimentacoes";
 import { criarMovimentacao } from "./criarMovimentacao";
@@ -12,8 +12,8 @@ import { removerMovimentacao } from "./removerMovimentacao";
 export const movimentacaoRoutes = Router();
 
 // GET /movimentacoes?produtoId= -> histórico de movimentações (mais recentes primeiro), filtro de produto opcional.
-movimentacaoRoutes.get("/", autenticar, exigirPerfil(...SO_ADMIN), listarMovimentacoes);
+movimentacaoRoutes.get("/", autenticar, exigirPerfil(...TODOS_INTERNOS), listarMovimentacoes);
 // POST /movimentacoes -> lança ENTRADA, SAIDA, PERDA ou AJUSTE e atualiza o saldo na mesma transação.
-movimentacaoRoutes.post("/", autenticar, exigirPerfil(...ADMIN_E_CAIXA), criarMovimentacao);
+movimentacaoRoutes.post("/", autenticar, exigirPerfil(...TODOS_INTERNOS), criarMovimentacao);
 // DELETE /movimentacoes/:id -> desfaz o efeito no saldo e apaga o lançamento.
 movimentacaoRoutes.delete("/:id", autenticar, exigirPerfil(...SO_ADMIN), removerMovimentacao);

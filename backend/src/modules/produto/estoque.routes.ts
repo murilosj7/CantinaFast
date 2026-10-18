@@ -2,7 +2,7 @@
 import { Router } from "express";
 // Middleware que exige token JWT válido.
 import { autenticar, exigirPerfil } from "../../middlewares/auth.middleware";
-import { SO_ADMIN, TODOS_INTERNOS } from "../../config/permissoes";
+import { TODOS_INTERNOS } from "../../config/permissoes";
 // As ações moram cada uma no seu arquivo, dentro do módulo de produto (reaproveitam os dados de Produto + Estoque).
 import { listarEstoque } from "./listarEstoque";
 import { atualizarEstoqueMinimo } from "./atualizarEstoqueMinimo";
@@ -13,6 +13,6 @@ export const estoqueRoutes = Router();
 // GET /estoque -> saldos de todos os produtos (tela "Saldos"), com filtros.
 estoqueRoutes.get("/", autenticar, exigirPerfil(...TODOS_INTERNOS), listarEstoque);
 // PATCH /estoque/:produtoId -> atualiza só o estoque mínimo (cria a linha zerada se o produto não tiver).
-estoqueRoutes.patch("/:produtoId", autenticar, exigirPerfil(...SO_ADMIN), atualizarEstoqueMinimo);
+estoqueRoutes.patch("/:produtoId", autenticar, exigirPerfil(...TODOS_INTERNOS), atualizarEstoqueMinimo);
 // PUT /estoque/:produtoId -> mesmo handler: o serviço do frontend (estoqueService.atualizarMinimo) chama por PUT.
-estoqueRoutes.put("/:produtoId", autenticar, exigirPerfil(...SO_ADMIN), atualizarEstoqueMinimo);
+estoqueRoutes.put("/:produtoId", autenticar, exigirPerfil(...TODOS_INTERNOS), atualizarEstoqueMinimo);

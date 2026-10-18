@@ -178,19 +178,16 @@ L.executar(t, async () => {
   await t.caso('JSON malformado → 400', async () => {
     L.erro(await t.http('PATCH', `/produtos/${p0.id}/estoque`, { token: adm.token, rawBody: '{tipo' }), 400, { contem: 'JSON' });
   });
-  // Permissões: o ajuste de estoque é só do administrador (caixa e atendente → 403, sem alterar o saldo nem gravar movimentação).
-  for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
-    await t.caso(`${nome} não ajusta estoque → 403 (saldo e movimentações intactos)`, async () => {
-      const movs = await t.prisma.movimentacaoEstoque.count({ where: { produtoId: p0.id } });
-      const antes = await t.prisma.estoque.findUnique({ where: { produtoId: p0.id } });
-      L.erro(await ajustar(p0.id, { tipo: 'ENTRADA', quantidade: 1 }, u.token), 403, { campo: null, contem: 'permissão' });
-      t.eq((await t.prisma.estoque.findUnique({ where: { produtoId: p0.id } })).quantidadeFisica, antes.quantidadeFisica);
-      t.eq(await t.prisma.movimentacaoEstoque.count({ where: { produtoId: p0.id } }), movs);
+  // Permissões: os três perfis controlam estoque (ajuste); a movimentação grava o usuário do TOKEN de quem ajustou.
+  for (const [nome, u] of [['administrador', adm], ['caixa', cx], ['atendente', at]]) {
+    await t.caso(`${nome} ajusta estoque (200) e a movimentação grava o usuário do token`, async () => {
+      const p = await t.produto({ qtd: 1 });
+      t.sucesso(await ajustar(p.id, { tipo: 'ENTRADA', quantidade: 2 }, u.token));
+      t.eq((await t.saldo(p.id)).quantidadeFisica, 3);
+      const [m] = await movs(p.id);
+      t.eq(m.usuarioId, u.id);
     });
   }
-  await t.caso('administrador ajusta estoque (200)', async () => {
-    t.sucesso(await ajustar(p0.id, { tipo: 'ENTRADA', quantidade: 1 }));
-  });
 
   // ---------------------------------------------------------------- concorrência
   // Concorrência: o SELECT ... FOR UPDATE serializa os ajustes; nenhum incremento se perde.

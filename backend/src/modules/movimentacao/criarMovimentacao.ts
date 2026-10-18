@@ -1,13 +1,11 @@
 // Tipos do Express: Request (o que chega) e Response (o que devolvemos).
 import type { Request, Response } from "express";
 // Enum de tipos de movimentação do banco (ENTRADA, SAIDA, PERDA, AJUSTE), usado como tipo e como valor.
-import { PerfilUsuario, TipoMovimentacaoEstoque } from "@prisma/client";
+import { TipoMovimentacaoEstoque } from "@prisma/client";
 // Instância única do Prisma para acessar o banco.
 import { prisma } from "../../config/prisma";
 // Erro padronizado (mensagem + status + campo).
 import { AppError } from "../../middlewares/errorHandler";
-// Mensagem padrão do 403 (a mesma do exigirPerfil).
-import { MENSAGEM_SEM_PERMISSAO } from "../../middlewares/auth.middleware";
 // Valida o produtoId vindo no corpo.
 import { parseId } from "../../utils/parseId";
 // Texto opcional (o motivo): vazio vira null, texto longo demais é recusado.
@@ -47,7 +45,7 @@ function lerQuantidade(valor: unknown, tipo: TipoMovimentacaoEstoque): number {
 }
 
 // POST /movimentacoes — body: { produtoId, tipo: "ENTRADA" | "SAIDA" | "PERDA" | "AJUSTE", quantidade, motivo? }.
-// Rota protegida (Caixa e Administrador; o Caixa só pode lançar PERDA, os demais tipos são do Administrador). O usuário gravado é SEMPRE o do token: um `usuarioId` enviado no corpo é ignorado.
+// Rota protegida (os três perfis internos). O usuário gravado é SEMPRE o do token: um `usuarioId` enviado no corpo é ignorado.
 //  - ENTRADA soma `quantidade` ao estoque físico; SAIDA e PERDA subtraem; AJUSTE soma o valor com sinal (delta).
 //  - O físico nunca fica negativo: se a operação deixaria, responde 400 informando o saldo atual.
 //  - Produto antigo sem linha em `estoque` ganha a linha zerada (e, se a operação falhar, a linha também é desfeita).
@@ -63,11 +61,6 @@ export async function criarMovimentacao(req: Request, res: Response) {
 
   // Pega os campos do corpo (se não veio corpo, usa um objeto vazio). `usuarioId` do corpo nem é lido.
   const { produtoId: produtoIdBruto, tipo: tipoBruto, quantidade: quantidadeBruta, motivo: motivoBruto } = req.body ?? {};
-  // Perfil ANTES de qualquer validação: o Caixa só registra PERDA (decisão do dono, D19); ENTRADA, SAIDA e AJUSTE são do Administrador.
-  const ehPerda = typeof tipoBruto === "string" && tipoBruto.trim().toUpperCase() === TipoMovimentacaoEstoque.PERDA;
-  if (!ehPerda && req.usuario.perfil !== PerfilUsuario.ADMINISTRADOR) {
-    throw new AppError(MENSAGEM_SEM_PERMISSAO, 403);
-  }
   // Valida tudo antes de abrir a transação.
   const produtoId = parseId(produtoIdBruto, "produtoId");
   const tipo = lerTipo(tipoBruto);

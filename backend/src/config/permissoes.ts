@@ -2,11 +2,11 @@
 // A matriz perfil x rota completa está em tests/teste-permissoes.cjs (que também confere que nenhuma rota interna fica sem regra).
 import { PerfilUsuario } from "@prisma/client";
 
-// Só o Administrador/Proprietário: usuários, produtos, categorias, ajuste de estoque, mínimo, histórico de movimentações.
+// Só o Administrador/Proprietário: usuários, produtos, categorias e a remoção de movimentações (apaga histórico).
 export const SO_ADMIN: PerfilUsuario[] = [PerfilUsuario.ADMINISTRADOR];
 
-// Caixa e Administrador: pagamentos (o PDV Atendimento não recebe pagamento) e registro de perdas (decisão do dono, D19).
+// Caixa e Administrador: pagamentos (o PDV Atendimento não recebe pagamento).
 export const ADMIN_E_CAIXA: PerfilUsuario[] = [PerfilUsuario.ADMINISTRADOR, PerfilUsuario.CAIXA];
 
-// Os três perfis internos: basta estar autenticado como usuário interno (pedidos, leitura de saldos).
+// Os três perfis internos: pedidos e controle de estoque (saldos, mínimo, ajuste e movimentações, exceto remover).
 export const TODOS_INTERNOS: PerfilUsuario[] = [PerfilUsuario.ADMINISTRADOR, PerfilUsuario.CAIXA, PerfilUsuario.ATENDENTE];

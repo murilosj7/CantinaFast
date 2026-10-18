@@ -1,6 +1,6 @@
 'use strict';
 // Permissões por perfil das rotas internas: teste guardião (toda rota registrada no Express tem regra) e matriz perfil x rota.
-// A matriz abaixo é a FONTE DA VERDADE dos testes: src/config/permissoes.ts + as rotas têm de bater com ela.
+// Perfis: Administrador (A), Caixa (C), Atendente (T). A matriz abaixo é a FONTE DA VERDADE dos testes: src/config/permissoes.ts + as rotas têm de bater com ela.
 const path = require('path');
 const { spawnSync } = require('child_process');
 const L = require('./_lib.cjs');
@@ -42,13 +42,12 @@ const MATRIZ = [
   { rota: 'POST /produtos', perfis: [A], caminho: '/produtos', body: {} },
   { rota: 'PATCH /produtos/:id', perfis: [A], caminho: `/produtos/${ID}`, body: {} },
   { rota: 'PATCH /produtos/:id/inativar', perfis: [A], caminho: `/produtos/${ID}/inativar` },
-  { rota: 'PATCH /produtos/:id/estoque', perfis: [A], caminho: `/produtos/${ID}/estoque`, body: {} },
+  { rota: 'PATCH /produtos/:id/estoque', perfis: [A, C, T], caminho: `/produtos/${ID}/estoque`, body: {} },
   { rota: 'GET /estoque', perfis: [A, C, T], caminho: '/estoque' },
-  { rota: 'PATCH /estoque/:produtoId', perfis: [A], caminho: `/estoque/${ID}`, body: {} },
-  { rota: 'PUT /estoque/:produtoId', perfis: [A], caminho: `/estoque/${ID}`, body: {} },
-  { rota: 'GET /movimentacoes', perfis: [A], caminho: '/movimentacoes' },
-  // Caixa passa pela rota, mas só com tipo PERDA (os demais tipos são do administrador: ver teste-movimentacao).
-  { rota: 'POST /movimentacoes', perfis: [A, C], caminho: '/movimentacoes', body: { tipo: 'PERDA' } },
+  { rota: 'PATCH /estoque/:produtoId', perfis: [A, C, T], caminho: `/estoque/${ID}`, body: {} },
+  { rota: 'PUT /estoque/:produtoId', perfis: [A, C, T], caminho: `/estoque/${ID}`, body: {} },
+  { rota: 'GET /movimentacoes', perfis: [A, C, T], caminho: '/movimentacoes' },
+  { rota: 'POST /movimentacoes', perfis: [A, C, T], caminho: '/movimentacoes', body: { tipo: 'PERDA' } },
   { rota: 'DELETE /movimentacoes/:id', perfis: [A], caminho: `/movimentacoes/${ID}` },
   { rota: 'POST /pedidos', perfis: [A, C, T], caminho: '/pedidos', body: {} },
   { rota: 'GET /pedidos', perfis: [A, C, T], caminho: '/pedidos' },

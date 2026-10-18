@@ -2,7 +2,7 @@
 import { Router } from "express";
 // Middleware que exige token JWT válido (rotas que alteram dados).
 import { autenticar, exigirPerfil } from "../../middlewares/auth.middleware";
-import { SO_ADMIN } from "../../config/permissoes";
+import { SO_ADMIN, TODOS_INTERNOS } from "../../config/permissoes";
 // Cada ação do módulo mora no seu próprio arquivo; aqui só ligamos cada rota à sua função.
 import { criarProduto } from "./criarProduto";
 import { listarProdutos } from "./listarProdutos";
@@ -28,4 +28,4 @@ produtoRoutes.patch("/:id", autenticar, exigirPerfil(...SO_ADMIN), atualizarProd
 // PATCH /produtos/:id/inativar -> atalho para inativar. PROTEGIDA.
 produtoRoutes.patch("/:id/inativar", autenticar, exigirPerfil(...SO_ADMIN), inativarProduto);
 // PATCH /produtos/:id/estoque -> reposição (ENTRADA) ou correção de contagem (AJUSTE) do estoque. PROTEGIDA (qualquer perfil logado).
-produtoRoutes.patch("/:id/estoque", autenticar, exigirPerfil(...SO_ADMIN), ajustarEstoque);
+produtoRoutes.patch("/:id/estoque", autenticar, exigirPerfil(...TODOS_INTERNOS), ajustarEstoque);
