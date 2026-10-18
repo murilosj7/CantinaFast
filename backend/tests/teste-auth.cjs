@@ -282,10 +282,10 @@ L.executar(t, async () => {
     await t.prisma.usuario.update({ where: { id: u.id }, data: { ativo: false } });
     L.erro(await me(u.token), 401, { contem: 'Sessão inválida' });
     // Rota que depende só do middleware (o /me repete a checagem e mascararia uma falha dele).
-    L.erro(await t.http('GET', '/interno/usuarios', { token: u.token }), 401, { contem: 'Sessão inválida' });
+    L.erro(await t.http('GET', '/estoque', { token: u.token }), 401, { contem: 'Sessão inválida' });
     await t.prisma.usuario.update({ where: { id: u.id }, data: { ativo: true } });
     t.sucesso(await me(u.token));
-    t.sucesso(await t.http('GET', '/interno/usuarios', { token: u.token }));
+    t.sucesso(await t.http('GET', '/estoque', { token: u.token }));
   });
   await t.caso('apagar o usuário depois do login derruba o token (401)', async () => {
     const u = await t.usuario('CAIXA');

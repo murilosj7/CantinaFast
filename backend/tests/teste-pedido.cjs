@@ -241,8 +241,8 @@ L.executar(t, async () => {
     L.erro(await t.http('PATCH', `/pedidos/${ped.id}`, { token: adm.token, body: { status: 'CANCELADO' } }), 404);
     L.erro(await t.http('PATCH', `/pedidos/${ped.id}/cancelar`, { token: adm.token }), 404);
   });
-  // Lacuna conhecida: qualquer perfil cria e consulta pedidos de qualquer usuário.
-  await t.lacuna('caixa e atendente criam e consultam pedidos de qualquer usuário (201/200)', async () => {
+  // Regra decidida: os três perfis criam pedidos e veem os de qualquer usuário (sem filtro por dono).
+  await t.caso('caixa e atendente criam e consultam pedidos de qualquer usuário (201/200)', async () => {
     t.sucesso(await pedir([item(pA)], 'PRESENCIAL', at.token), 201);
     t.sucesso(await t.http('GET', `/pedidos/${ped.id}`, { token: at.token }));
     t.sucesso(await t.http('GET', '/pedidos', { token: cx.token }));

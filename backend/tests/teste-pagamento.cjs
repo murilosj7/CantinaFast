@@ -177,19 +177,21 @@ L.executar(t, async () => {
     L.erro(await t.http('DELETE', `/pagamentos/${pg.id}`, { token: adm.token }), 404);
     L.erro(await t.http('PATCH', `/pagamentos/${pg.id}`, { token: adm.token, body: {} }), 404);
   });
-  await t.caso('caixa e atendente conseguem registrar pagamento', async () => {
+  // Permissões: o PDV Atendimento não recebe pagamento; registrar e listar pagamentos é de Caixa e Administrador.
+  await t.caso('caixa registra pagamento, inclusive do pedido criado por OUTRO usuário (atendente envia ao caixa)', async () => {
     const a = await novoPedido(1, cx.token);
     t.sucesso(await pagar({ pedidoId: a.id, formaPagamento: 'DINHEIRO', valor: 10 }, cx.token), 201);
     const b = await novoPedido(1, at.token);
-    t.sucesso(await pagar({ pedidoId: b.id, formaPagamento: 'PIX', valor: 10 }, at.token), 201);
+    t.sucesso(await pagar({ pedidoId: b.id, formaPagamento: 'PIX', valor: 10 }, cx.token), 201);
   });
-  // Lacuna conhecida: qualquer perfil paga o pedido de qualquer usuário e lista pagamentos de qualquer pedido.
-  await t.lacuna('qualquer perfil paga o pedido de OUTRO usuário (atendente paga pedido criado pelo administrador)', async () => {
-    const p = await novoPedido(1, adm.token);
-    t.sucesso(await pagar({ pedidoId: p.id, formaPagamento: 'PIX', valor: 10 }, at.token), 201);
+  await t.caso('atendente NÃO registra pagamento → 403 (nem do próprio pedido); o pedido segue sem pagamento', async () => {
+    const b = await novoPedido(1, at.token);
+    L.erro(await pagar({ pedidoId: b.id, formaPagamento: 'PIX', valor: 10 }, at.token), 403, { campo: null, contem: 'permissão' });
+    t.eq(await t.prisma.pagamento.count({ where: { pedidoId: b.id } }), 0);
   });
-  await t.lacuna('qualquer perfil lista os pagamentos de qualquer pedido (200)', async () => {
-    t.sucesso(await t.http('GET', `/pagamentos/pedido/${pedido.id}`, { token: at.token }));
+  await t.caso('atendente NÃO lista os pagamentos de um pedido → 403; o caixa lista (200)', async () => {
+    L.erro(await t.http('GET', `/pagamentos/pedido/${pedido.id}`, { token: at.token }), 403, { campo: null, contem: 'permissão' });
+    t.sucesso(await t.http('GET', `/pagamentos/pedido/${pedido.id}`, { token: cx.token }));
   });
 
   // ---------------------------------------------------------------- concorrência

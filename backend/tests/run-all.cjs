@@ -24,6 +24,7 @@ const SUITES = [
   { nome: 'pagamento', servidor: true },
   { nome: 'saldos', servidor: true },
   { nome: 'movimentacao', servidor: true },
+  { nome: 'permissoes', servidor: true },
   { nome: 'seed', servidor: false },
   { nome: 'seguranca', servidor: false }, // sobe o próprio servidor em cada fase
 ];

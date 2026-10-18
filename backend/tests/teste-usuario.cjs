@@ -112,7 +112,7 @@ L.executar(t, async () => {
   });
 
   // ---- permissões
-  // Permissões: só o administrador cria, edita e inativa. Consultar (GET) é aberto a qualquer perfil autenticado.
+  // Permissões: só o administrador cria, edita, inativa e consulta usuários (listar e ver por id também são dele).
   for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
     await t.caso(`${nome} não cria usuário → 403`, async () => {
       L.erro(await post(base(), u.token), 403, { campo: null, contem: 'permissão' });
@@ -123,12 +123,11 @@ L.executar(t, async () => {
     await t.caso(`${nome} não inativa usuário → 403`, async () => {
       L.erro(await inativar(criado.id, u.token), 403);
     });
-    // Lacuna conhecida: listar e consultar usuários não exige perfil de administrador.
-    await t.lacuna(`${nome} consegue listar usuários (200)`, async () => {
-      t.verdade(Array.isArray(t.sucesso(await t.http('GET', '/interno/usuarios', { token: u.token }))));
+    await t.caso(`${nome} não lista usuários → 403`, async () => {
+      L.erro(await t.http('GET', '/interno/usuarios', { token: u.token }), 403, { campo: null, contem: 'permissão' });
     });
-    await t.lacuna(`${nome} consegue ver um usuário por id (200)`, async () => {
-      t.sucesso(await t.http('GET', `/interno/usuarios/${criado.id}`, { token: u.token }));
+    await t.caso(`${nome} não vê um usuário por id → 403`, async () => {
+      L.erro(await t.http('GET', `/interno/usuarios/${criado.id}`, { token: u.token }), 403);
     });
   }
   for (const [m, rota] of [['POST', '/interno/usuarios'], ['GET', '/interno/usuarios'], ['GET', `/interno/usuarios/${criado.id}`], ['PATCH', `/interno/usuarios/${criado.id}`], ['PATCH', `/interno/usuarios/${criado.id}/inativar`]]) {

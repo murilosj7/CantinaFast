@@ -20,9 +20,9 @@ const soAdministrador = exigirPerfil(PerfilUsuario.ADMINISTRADOR);
 // POST /interno/usuarios -> cadastra um usuário. Precisa de token E de perfil ADMINISTRADOR.
 usuarioRoutes.post("/", autenticar, soAdministrador, criarUsuario);
 // GET /interno/usuarios -> lista (com filtros). Precisa de token (qualquer perfil).
-usuarioRoutes.get("/", autenticar, listarUsuarios);
+usuarioRoutes.get("/", autenticar, soAdministrador, listarUsuarios);
 // GET /interno/usuarios/:id -> busca um usuário pelo id. Precisa de token (qualquer perfil).
-usuarioRoutes.get("/:id", autenticar, buscarUsuarioPorId);
+usuarioRoutes.get("/:id", autenticar, soAdministrador, buscarUsuarioPorId);
 // PATCH /interno/usuarios/:id -> atualiza campos do usuário (inclusive ativo). Token E perfil ADMINISTRADOR.
 usuarioRoutes.patch("/:id", autenticar, soAdministrador, atualizarUsuario);
 // PATCH /interno/usuarios/:id/inativar -> atalho para inativar. Token E perfil ADMINISTRADOR.

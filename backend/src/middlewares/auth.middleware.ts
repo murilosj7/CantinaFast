@@ -15,7 +15,7 @@ import { AppError } from "./errorHandler";
 export const MENSAGEM_SESSAO_INVALIDA = "Sessão inválida. Faça login novamente.";
 // Mensagem de token válido, mas do lado errado (cliente em rota interna ou usuário interno em rota de cliente).
 // É a mesma do exigirPerfil: o token é legítimo, só não tem permissão para esta rota.
-const MENSAGEM_SEM_PERMISSAO = "Você não tem permissão para realizar esta ação.";
+export const MENSAGEM_SEM_PERMISSAO = "Você não tem permissão para realizar esta ação.";
 
 // Ensina o TypeScript que, depois destes middlewares, a requisição passa a ter `req.usuario` ou `req.cliente`.
 declare global {
@@ -150,7 +150,7 @@ export async function autenticarCliente(req: Request, res: Response, next: NextF
 // Perfil sem permissão responde 403 no formato { mensagem }.
 export function exigirPerfil(...perfisPermitidos: PerfilUsuario[]) {
   // Devolve o middleware de fato, já "sabendo" quais perfis podem passar.
-  return (req: Request, res: Response, next: NextFunction) => {
+  const middleware = (req: Request, res: Response, next: NextFunction) => {
     // Se `autenticar` não rodou antes, não sabemos quem é o usuário: trata como não autenticado.
     if (!req.usuario) {
       throw new AppError("Não autenticado.", 401);
@@ -162,4 +162,6 @@ export function exigirPerfil(...perfisPermitidos: PerfilUsuario[]) {
     // Perfil permitido: libera a requisição para seguir para a rota.
     next();
   };
+  // Expõe a lista de perfis na função: o teste guardião (tests/teste-permissoes.cjs) lê daqui a regra de cada rota registrada.
+  return Object.assign(middleware, { perfisPermitidos });
 }

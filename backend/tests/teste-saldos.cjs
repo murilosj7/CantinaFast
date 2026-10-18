@@ -111,8 +111,8 @@ L.executar(t, async () => {
   await t.caso('GET /estoque sem token → 401 (não é público)', async () => {
     L.erro(await t.http('GET', '/estoque'), 401);
   });
-  // Lacuna conhecida: saldos e mínimo não exigem perfil específico.
-  await t.lacuna('caixa e atendente também consultam saldos (200)', async () => {
+  // Regra decidida: os três perfis consultam os saldos (leitura); alterar o mínimo é só do administrador (ver abaixo).
+  await t.caso('caixa e atendente também consultam saldos (200)', async () => {
     await lista('', cx.token);
     await lista('', at.token);
   });
@@ -175,9 +175,19 @@ L.executar(t, async () => {
   await t.caso('DELETE /estoque/:id não existe (404 de rota)', async () => {
     L.erro(await t.http('DELETE', `/estoque/${ok.id}`, { token: adm.token }), 404, { contem: 'Rota não encontrada' });
   });
-  await t.lacuna('caixa e atendente também alteram o estoque mínimo (200)', async () => {
-    t.sucesso(await minimo(ok.id, { estoqueMinimo: 5 }, 'PATCH', cx.token));
-    t.sucesso(await minimo(ok.id, { estoqueMinimo: 5 }, 'PUT', at.token));
+  // Permissões: o mínimo é só do administrador (PATCH e PUT), sem alterar o valor.
+  for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
+    for (const metodo of ['PATCH', 'PUT']) {
+      await t.caso(`${nome} não altera o estoque mínimo (${metodo}) → 403`, async () => {
+        const antes = (await t.prisma.estoque.findUnique({ where: { produtoId: ok.id } })).estoqueMinimo;
+        L.erro(await minimo(ok.id, { estoqueMinimo: 77 }, metodo, u.token), 403, { campo: null, contem: 'permissão' });
+        t.eq((await t.prisma.estoque.findUnique({ where: { produtoId: ok.id } })).estoqueMinimo, antes);
+      });
+    }
+  }
+  await t.caso('administrador altera o estoque mínimo (PATCH e PUT)', async () => {
+    t.sucesso(await minimo(ok.id, { estoqueMinimo: 5 }, 'PATCH'));
+    t.sucesso(await minimo(ok.id, { estoqueMinimo: 6 }, 'PUT'));
   });
   await t.caso('atualizações simultâneas do mínimo: o valor final é um dos enviados e a linha é única', async () => {
     const p = await semEstoque();

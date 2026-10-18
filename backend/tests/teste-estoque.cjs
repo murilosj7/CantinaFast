@@ -30,9 +30,9 @@ L.executar(t, async () => {
   });
   await t.caso('ENTRADA grava UMA movimentação ENTRADA com a quantidade, usuário do token e motivo padrão', async () => {
     const p = await t.produto({ qtd: 1 });
-    t.sucesso(await ajustar(p.id, { tipo: 'ENTRADA', quantidade: 4 }, cx.token));
+    t.sucesso(await ajustar(p.id, { tipo: 'ENTRADA', quantidade: 4 }, adm.token));
     const [m] = await movs(p.id);
-    t.eq([m.tipo, m.quantidade, m.motivo, m.usuarioId], ['ENTRADA', 4, 'Reposição de estoque', cx.id]);
+    t.eq([m.tipo, m.quantidade, m.motivo, m.usuarioId], ['ENTRADA', 4, 'Reposição de estoque', adm.id]);
   });
   await t.caso('motivo informado é gravado (aparado)', async () => {
     const p = await t.produto();
@@ -178,12 +178,18 @@ L.executar(t, async () => {
   await t.caso('JSON malformado → 400', async () => {
     L.erro(await t.http('PATCH', `/produtos/${p0.id}/estoque`, { token: adm.token, rawBody: '{tipo' }), 400, { contem: 'JSON' });
   });
-  // Lacuna conhecida: qualquer perfil autenticado ajusta estoque.
-  await t.lacuna('caixa pode ajustar estoque (200)', async () => {
-    t.sucesso(await ajustar(p0.id, { tipo: 'ENTRADA', quantidade: 1 }, cx.token));
-  });
-  await t.lacuna('atendente pode ajustar estoque (200)', async () => {
-    t.sucesso(await ajustar(p0.id, { tipo: 'ENTRADA', quantidade: 1 }, at.token));
+  // Permissões: o ajuste de estoque é só do administrador (caixa e atendente → 403, sem alterar o saldo nem gravar movimentação).
+  for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
+    await t.caso(`${nome} não ajusta estoque → 403 (saldo e movimentações intactos)`, async () => {
+      const movs = await t.prisma.movimentacaoEstoque.count({ where: { produtoId: p0.id } });
+      const antes = await t.prisma.estoque.findUnique({ where: { produtoId: p0.id } });
+      L.erro(await ajustar(p0.id, { tipo: 'ENTRADA', quantidade: 1 }, u.token), 403, { campo: null, contem: 'permissão' });
+      t.eq((await t.prisma.estoque.findUnique({ where: { produtoId: p0.id } })).quantidadeFisica, antes.quantidadeFisica);
+      t.eq(await t.prisma.movimentacaoEstoque.count({ where: { produtoId: p0.id } }), movs);
+    });
+  }
+  await t.caso('administrador ajusta estoque (200)', async () => {
+    t.sucesso(await ajustar(p0.id, { tipo: 'ENTRADA', quantidade: 1 }));
   });
 
   // ---------------------------------------------------------------- concorrência

@@ -200,17 +200,25 @@ L.executar(t, async () => {
       L.erro(await t.http(m, rota, { body }), 401);
     });
   }
-  // Lacuna conhecida: as rotas de categoria só exigem autenticação, não há restrição por perfil.
-  // As asserções abaixo fixam esse comportamento atual; se a regra mudar, elas mudam junto.
-  await t.lacuna('caixa também cria categoria (201): não há restrição de perfil', async () => {
-    t.sucesso(await criar(t.unico('cx'), cx.token), 201);
-  });
-  await t.lacuna('atendente também cria categoria (201): não há restrição de perfil', async () => {
-    t.sucesso(await criar(t.unico('at'), at.token), 201);
-  });
-  await t.lacuna('atendente também inativa categoria (200)', async () => {
-    const c = await t.categoria();
-    t.sucesso(await t.http('PATCH', `/categorias/${c.id}/inativar`, { token: at.token }));
+  // Permissões: criar, editar e inativar categoria é só do administrador (caixa e atendente → 403; a leitura segue pública).
+  for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
+    await t.caso(`${nome} não cria categoria → 403`, async () => {
+      const antes = await t.prisma.categoria.count();
+      L.erro(await criar(t.unico('x'), u.token), 403, { campo: null, contem: 'permissão' });
+      t.eq(await t.prisma.categoria.count(), antes);
+    });
+    await t.caso(`${nome} não edita categoria → 403`, async () => {
+      L.erro(await t.http('PATCH', `/categorias/${cat.id}`, { token: u.token, body: { nome: t.unico('x') } }), 403);
+    });
+    await t.caso(`${nome} não inativa categoria → 403 (e ela segue ativa)`, async () => {
+      const c = await t.categoria();
+      L.erro(await t.http('PATCH', `/categorias/${c.id}/inativar`, { token: u.token }), 403);
+      t.eq((await t.prisma.categoria.findUnique({ where: { id: c.id } })).ativa, true);
+    });
+  }
+  await t.caso('administrador cria e inativa categoria (201/200)', async () => {
+    const c = t.sucesso(await criar(t.unico('adm')), 201);
+    t.sucesso(await t.http('PATCH', `/categorias/${c.id}/inativar`, { token: adm.token }));
   });
   // [DIVERGE-PDF] D8 — a API expõe o campo como 'ativa'; o PDF chama o campo de 'ativo'.
   await t.diverge('o campo de situação da categoria se chama "ativa" (PDF: "ativo")', async () => {

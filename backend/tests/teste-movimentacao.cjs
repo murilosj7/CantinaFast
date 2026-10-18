@@ -52,7 +52,7 @@ L.executar(t, async () => {
   });
   await t.caso('o usuário é o do token; usuarioId no corpo é ignorado', async () => {
     const p = await comSaldo(5);
-    t.eq(t.sucesso(await mov({ produtoId: p.id, tipo: 'ENTRADA', quantidade: 1, usuarioId: adm.id }, cx.token), 201).usuarioId, cx.id);
+    t.eq(t.sucesso(await mov({ produtoId: p.id, tipo: 'PERDA', quantidade: 1, usuarioId: adm.id }, cx.token), 201).usuarioId, cx.id);
   });
   await t.caso('tipo aceita minúsculas e espaços', async () => {
     const p = await comSaldo(5);
@@ -308,10 +308,11 @@ L.executar(t, async () => {
       t.eq(await fisico(p.id), 10);
     });
   }
-  await t.caso('REGRA: o bloqueio vale para qualquer tipo/perfil (ENTRADA com motivo de venda; caixa tentando remover)', async () => {
+  await t.caso('REGRA: o bloqueio vale para qualquer tipo (ENTRADA com motivo de venda); o caixa nem chega a ela (403)', async () => {
     const p = await comSaldo(0);
     const m = t.sucesso(await mov({ produtoId: p.id, tipo: 'ENTRADA', quantidade: 2, motivo: 'Venda - pedido #7' }), 201);
-    L.erro(await del(m.id, cx.token), 400, { mensagem: MSG_VENDA });
+    L.erro(await del(m.id, cx.token), 403);
+    L.erro(await del(m.id), 400, { mensagem: MSG_VENDA });
   });
   await t.caso('REGRA: a checagem da venda vem antes da checagem de saldo (400, não 409)', async () => {
     const p = await comSaldo(0);
@@ -504,20 +505,47 @@ L.executar(t, async () => {
   });
 
   // ---------------------------------------------------------------- permissões e divergências
-  // Lacuna conhecida: qualquer perfil cria, remove e lista movimentações.
-  await t.lacuna('caixa cria movimentação (201)', async () => {
-    t.sucesso(await mov({ produtoId: pv.id, tipo: 'ENTRADA', quantidade: 1 }, cx.token), 201);
+  // Permissões: criar movimentação é de Caixa e Administrador, mas o Caixa só lança PERDA (ENTRADA, SAIDA e AJUSTE são do
+  // administrador); o atendente não lança nada; remover e listar o histórico é só do administrador.
+  // [DIVERGE-PDF] D19 — o PDF diz que o atendente registra perdas "quando autorizado"; decisão do dono: só Caixa e Administrador.
+  await t.diverge('D19: o atendente NÃO registra perda (403); só Caixa e Administrador', async () => {
+    const antes = await t.prisma.movimentacaoEstoque.count({ where: { produtoId: pv.id } });
+    L.erro(await mov({ produtoId: pv.id, tipo: 'PERDA', quantidade: 1 }, at.token), 403, { campo: null, contem: 'permissão' });
+    t.eq(await t.prisma.movimentacaoEstoque.count({ where: { produtoId: pv.id } }), antes);
   });
-  await t.lacuna('atendente cria movimentação (201)', async () => {
-    t.sucesso(await mov({ produtoId: pv.id, tipo: 'ENTRADA', quantidade: 1 }, at.token), 201);
+  await t.diverge('D19: o caixa registra perda (201) com o usuário do token', async () => {
+    const p = await comSaldo(5);
+    const r = t.sucesso(await mov({ produtoId: p.id, tipo: 'PERDA', quantidade: 2, motivo: 'vencimento' }, cx.token), 201);
+    t.eq([r.tipo, r.usuarioId, await fisico(p.id)], ['PERDA', cx.id, 3]);
   });
-  await t.lacuna('atendente remove movimentação (204)', async () => {
-    const m = t.sucesso(await mov({ produtoId: pv.id, tipo: 'ENTRADA', quantidade: 1 }), 201);
-    t.eq((await del(m.id, at.token)).status, 204);
+  for (const tipo of ['ENTRADA', 'SAIDA', 'AJUSTE', '  entrada ']) {
+    await t.caso(`caixa não lança ${tipo.trim()} → 403 (o saldo não muda)`, async () => {
+      const p = await comSaldo(5);
+      L.erro(await mov({ produtoId: p.id, tipo, quantidade: 1 }, cx.token), 403, { campo: null, contem: 'permissão' });
+      t.eq(await fisico(p.id), 5);
+    });
+  }
+  await t.caso('o 403 do caixa vem antes da validação (tipo inválido e corpo vazio também dão 403)', async () => {
+    L.erro(await mov({ produtoId: pv.id, tipo: 'XYZ', quantidade: 1 }, cx.token), 403);
+    L.erro(await mov({}, cx.token), 403);
   });
-  await t.lacuna('qualquer perfil lista o histórico completo (200)', async () => {
-    t.sucesso(await t.http('GET', '/movimentacoes', { token: at.token }));
-  });
+  for (const tipo of ['ENTRADA', 'SAIDA', 'PERDA', 'AJUSTE']) {
+    await t.caso(`atendente não lança ${tipo} → 403`, async () => {
+      const p = await comSaldo(5);
+      L.erro(await mov({ produtoId: p.id, tipo, quantidade: 1 }, at.token), 403, { campo: null, contem: 'permissão' });
+      t.eq(await fisico(p.id), 5);
+    });
+  }
+  for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
+    await t.caso(`${nome} não remove movimentação → 403 (ela continua lá)`, async () => {
+      const m = t.sucesso(await mov({ produtoId: pv.id, tipo: 'ENTRADA', quantidade: 1 }), 201);
+      L.erro(await del(m.id, u.token), 403, { campo: null, contem: 'permissão' });
+      t.eq(await existe(m.id), 1);
+    });
+    await t.caso(`${nome} não lista o histórico de movimentações → 403`, async () => {
+      L.erro(await t.http('GET', '/movimentacoes', { token: u.token }), 403, { campo: null, contem: 'permissão' });
+    });
+  }
   // [DIVERGE-PDF] D12 — PDF prevê os tipos venda e retorno; a API só aceita ENTRADA, SAIDA, PERDA e AJUSTE.
   await t.diverge('tipos aceitos: só ENTRADA, SAIDA, PERDA e AJUSTE — VENDA e RETORNO do PDF são rejeitados', async () => {
     for (const tipo of ['VENDA', 'RETORNO']) L.erro(await mov({ produtoId: pv.id, tipo, quantidade: 1 }), 400, { campo: 'tipo' });

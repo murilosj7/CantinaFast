@@ -25,16 +25,18 @@ Itens **prioritários** (D1 e D2) ficam para ser corrigidos junto com `ReservaEs
 | D12 | Movimentação | Tipos: entrada, saída, ajuste, **venda**, perda, **retorno**; `id_pedido` FK NULL. | Só `ENTRADA`, `SAIDA`, `PERDA`, `AJUSTE`. A venda é `SAIDA` com o texto `Venda - pedido #N` no motivo; não há `pedidoId` (decisão registrada: o bloqueio de remoção usa o texto). O ajuste de estoque do produto grava `ENTRADA`/`SAIDA`, nunca `AJUSTE`. | Média |
 | D13 | Quantidades | `NUMERIC(12,3)` em item de pedido, movimentação, estoque e mínimo (aceita fração, ex.: venda por peso). | Tudo `Int`; frações são rejeitadas (400) em pedido, movimentação, ajuste e estoque mínimo. | Média |
 | D14 | Produto | Campos `custo`, `ncm`, `cfop_padrao`; estoque físico/mínimo dentro de PRODUTO; preço `NUMERIC(12,2)`. | Sem custo/ncm/cfop; estoque em tabela própria (decisão do `CLAUDE.md`); preço `Decimal(10,2)` (teto R$ 99.999.999,99). | Baixa |
-| D15 | Auditoria | Alterações críticas de preço, estoque, usuários, cancelamentos e fiscal devem manter usuário, data/hora e informação suficiente. | Entidade `AUDITORIA` não existe. `DELETE /movimentacoes/:id` apaga fisicamente o histórico de estoque sem rastro; mudanças de preço e de usuário também não deixam registro. | Média |
+| D15 | Auditoria | Alterações críticas de preço, estoque, usuários, cancelamentos e fiscal devem manter usuário, data/hora e informação suficiente. | Entidade `AUDITORIA` não existe. `DELETE /movimentacoes/:id` apaga fisicamente o histórico de estoque sem rastro; mudanças de preço e de usuário (inclusive a MUDANÇA DE PERFIL) também não deixam registro; a auditoria fica para o módulo Auditoria, sem log provisório. | Média |
 | D16 | Cliente | `id_cliente` BIGSERIAL (todos os ids do PDF são BIGSERIAL/BIGINT). | `clientes.id` é `Int` (SERIAL), igual a `pedidos.clienteId` e a todos os demais ids do schema. Migrar **todos** os ids para `BigInt` é uma tarefa única de reconciliação, não módulo a módulo. | Baixa |
 | D17 | Cliente | `telefone` VARCHAR(20): "WhatsApp/telefone". | A API usa `telefone`; o contrato do frontend (`contrato-api-cantinafast.md`) fala em `whatsapp` no cadastro e no usuário do site. O frontend ou o mapper precisa de acordo antes de ligar o site. | Baixa |
 | D18 | Cliente | `login_google` VARCHAR(255), sem UNIQUE no PDF. | Sem `@unique` também na API (fiel ao PDF), então dois clientes podem ter o mesmo `loginGoogle`. Avaliar um índice único parcial (`WHERE login_google IS NOT NULL`) na reconciliação, antes de implementar o login Google. | Baixa (antes do login Google) |
+| D19 | Permissões | Caso de uso "Registrar perdas (quando autorizado)" do Atendente (diagrama de casos de uso). | Decisão do dono do projeto: perda só para **Caixa e Administrador**; o Atendente não registra perda (403). Hoje a perda é `POST /movimentacoes` com `tipo=PERDA` (rota liberada a Caixa e Administrador; o Caixa só pode `PERDA`). Testes marcados `[DIVERGE-PDF]` em `teste-movimentacao`. | Média |
 
 ## Observações
 
-- **Permissões por perfil**: o PDF só diz que o perfil é Administrador, Atendente ou Caixa. Hoje só `POST/PATCH/inativar` de
-  `/interno/usuarios` são exclusivos do administrador; todas as demais rotas aceitam qualquer perfil autenticado. As suítes fixam
-  isso como "comportamento atual (lacuna conhecida)" — não é uma divergência com o PDF, mas é uma decisão a tomar.
+- **Permissões por perfil** (aplicadas): matriz perfil x rota em `tests/teste-permissoes.cjs` e `src/config/permissoes.ts`. Administrador:
+  usuários, produtos, categorias, ajuste de estoque e do mínimo, histórico de movimentações e remoção. Caixa e Administrador: pagamentos
+  (o PDV Atendimento não recebe pagamento) e perdas (D19). Os três perfis: pedidos (criar e ver todos) e leitura de saldos (`GET /estoque`).
+  Um teste guardião falha se alguma rota interna ficar sem `exigirPerfil` fora da lista de públicas permitidas.
 - O que **bate** com o PDF e é testado normalmente: `Usuario` (perfis e `ativo`), código de barras `UNIQUE`, exclusão lógica por
   `ativo`, preço congelado no item do pedido, transação contra estoque negativo e venda concorrente da última unidade.
 - Tradução dos enums nos mappers (perfil em minúsculo, dinheiro como `number`, datas ISO) é decisão do projeto e é testada como regra.

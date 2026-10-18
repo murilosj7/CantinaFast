@@ -393,20 +393,24 @@ L.executar(t, async () => {
   });
 
   // ---------------------------------------------------------------- permissões e divergências
-  // Lacuna conhecida: criar, editar preço e inativar produto não exige perfil de administrador.
-  await t.lacuna('caixa também cria produto (201)', async () => {
-    t.sucesso(await post({}, cx.token), 201);
-  });
-  await t.lacuna('atendente também cria produto (201)', async () => {
-    t.sucesso(await post({}, at.token), 201);
-  });
-  await t.lacuna('atendente também altera preço (200)', async () => {
-    t.sucesso(await patch(alvo.id, { preco: 9 }, at.token));
-  });
-  await t.lacuna('atendente também inativa produto (200)', async () => {
-    const p = t.sucesso(await post(), 201);
-    t.sucesso(await t.http('PATCH', `/produtos/${p.id}/inativar`, { token: at.token }));
-  });
+  // Permissões: criar, editar (inclui preço) e inativar produto é só do administrador; a leitura (cardápio) segue pública.
+  for (const [nome, u] of [['caixa', cx], ['atendente', at]]) {
+    await t.caso(`${nome} não cria produto → 403`, async () => {
+      const antes = await t.prisma.produto.count();
+      L.erro(await post({}, u.token), 403, { campo: null, contem: 'permissão' });
+      t.eq(await t.prisma.produto.count(), antes);
+    });
+    await t.caso(`${nome} não altera preço → 403 (o preço não muda)`, async () => {
+      const antes = await t.prisma.produto.findUnique({ where: { id: alvo.id } });
+      L.erro(await patch(alvo.id, { preco: 9 }, u.token), 403);
+      t.eq(String((await t.prisma.produto.findUnique({ where: { id: alvo.id } })).precoVenda), String(antes.precoVenda));
+    });
+    await t.caso(`${nome} não inativa produto → 403 (ele segue ativo)`, async () => {
+      const p = t.sucesso(await post(), 201);
+      L.erro(await t.http('PATCH', `/produtos/${p.id}/inativar`, { token: u.token }), 403);
+      t.eq((await t.prisma.produto.findUnique({ where: { id: p.id } })).ativo, true);
+    });
+  }
   // [DIVERGE-PDF] D14 — o PDF prevê custo, ncm e cfop_padrao em PRODUTO.
   await t.diverge('produto não tem custo, ncm nem cfop_padrao (PDF prevê esses campos)', async () => {
     const p = t.sucesso(await post(), 201);
