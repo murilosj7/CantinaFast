@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { usePode } from '../auth/AuthContext';
-import { Alerta, Badge, Button, Campo, Confirmacao, Entrada, Interruptor, LinhaMensagem, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
+import { Abas, Alerta, Badge, Button, Campo, CartaoLista, Confirmacao, Entrada, Interruptor, LinhaMensagem, MensagemVazia, Modal, PaginaCabecalho, Segmentado, Selecao, tabela } from '../components/ui';
 import { lerErro } from '../lib/api';
 import { dataHora, deltaMovimentacao, TIPO_MOV_ROTULO, TIPO_MOV_TOM, type Tom } from '../lib/format';
 import { useCarregar } from '../lib/useCarregar';
@@ -108,25 +108,11 @@ export function EstoquePage() {
     }
   }
 
-  const botaoAba = (id: Aba, rotulo: string) => (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={aba === id}
-      onClick={() => setAba(id)}
-      className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600 ${
-        aba === id ? 'border-brasa-600 text-brasa-700' : 'border-transparent text-carvao/70 hover:text-carvao'
-      }`}
-    >
-      {rotulo}
-    </button>
-  );
-
   return (
     <>
       <PaginaCabecalho
         titulo="Estoque"
-        descricao="Saldo de cada produto e o histórico de entradas, saídas, perdas e ajustes. O saldo só muda por movimentação (ou por venda)."
+        descricao="Saldo de cada produto e o histórico de entradas, saídas, perdas e ajustes. O saldo só muda por movimentação ou venda."
         acao={podeRegistrar ? <Button onClick={() => setMovimentando({ produtoId: null })}>Registrar movimentação</Button> : undefined}
       />
 
@@ -134,10 +120,15 @@ export function EstoquePage() {
         {mensagem && <Alerta tipo="sucesso">{mensagem}</Alerta>}
         {erroAcao && <Alerta>{erroAcao}</Alerta>}
 
-        <div role="tablist" aria-label="Estoque" className="flex gap-1 border-b border-carvao/15">
-          {botaoAba('saldos', 'Saldos')}
-          {botaoAba('movimentacoes', 'Movimentações')}
-        </div>
+        <Abas
+          rotulo="Estoque"
+          abas={[
+            { valor: 'saldos', rotulo: 'Saldos' },
+            { valor: 'movimentacoes', rotulo: 'Movimentações' },
+          ]}
+          valor={aba}
+          aoMudar={setAba}
+        />
 
         {aba === 'saldos' ? (
           <div className="space-y-4">
@@ -169,7 +160,59 @@ export function EstoquePage() {
               <Interruptor rotulo="Só estoque baixo ou zerado" marcado={soBaixo} aoMudar={setSoBaixo} />
             </div>
 
-            <div className={tabela.caixa}>
+            {/* Tablet: um cartão por produto, com o número que importa grande e as ações em botões largos */}
+            <div className={`lg:hidden ${saldos.carregando && saldos.dados ? 'opacity-60' : ''}`}>
+              {!saldos.dados && saldos.carregando ? (
+                <MensagemVazia>Carregando…</MensagemVazia>
+              ) : saldosVisiveis.length === 0 ? (
+                <MensagemVazia>Nenhum produto encontrado com esses filtros.</MensagemVazia>
+              ) : (
+                <CartaoLista>
+                  {saldosVisiveis.map((e) => {
+                    const situacao = situacaoDe(e);
+                    return (
+                      <li key={e.id} className="flex flex-col gap-3 rounded-card border border-carvao/10 bg-white p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-medium">{e.produto.nome}</p>
+                            {e.produto.codigoBarras && <p className="text-xs text-carvao/60">Código {e.produto.codigoBarras}</p>}
+                          </div>
+                          <Badge tom={situacao.tom}>{situacao.texto}</Badge>
+                        </div>
+                        <div className="flex items-end justify-between gap-2">
+                          <p>
+                            <span className="text-3xl font-semibold tabular-nums">{disponivelDe(e)}</span>{' '}
+                            <span className="text-sm text-carvao/70">disponíveis</span>
+                          </p>
+                          <p className="text-right text-xs text-carvao/65 tabular-nums">
+                            Físico {e.quantidadeFisica} · Reservado {e.quantidadeReservada}
+                            <br />
+                            Mínimo {e.estoqueMinimo}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {podeRegistrar && (
+                            <Button onClick={() => setMovimentando({ produtoId: e.produtoId })}>
+                              Movimentar
+                            </Button>
+                          )}
+                          {podeAjustar && (
+                            <Button variante="secundario" onClick={() => setEditandoMinimo(e)}>
+                              Mínimo
+                            </Button>
+                          )}
+                          <Button variante="secundario" onClick={() => verHistorico(e.produtoId)}>
+                            Histórico
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </CartaoLista>
+              )}
+            </div>
+
+            <div className={`hidden lg:block ${tabela.caixa}`}>
               <table className={tabela.base}>
                 <thead className={tabela.cabecalho}>
                   <tr>
@@ -275,7 +318,45 @@ export function EstoquePage() {
               </Selecao>
             </div>
 
-            <div className={tabela.caixa}>
+            <div className={`lg:hidden ${movs.carregando && movs.dados ? 'opacity-60' : ''}`}>
+              {!movs.dados && movs.carregando ? (
+                <MensagemVazia>Carregando…</MensagemVazia>
+              ) : movsVisiveis.length === 0 ? (
+                <MensagemVazia>Nenhuma movimentação encontrada com esses filtros.</MensagemVazia>
+              ) : (
+                <CartaoLista>
+                  {movsVisiveis.map((m) => {
+                    const delta = deltaMovimentacao(m.tipo, m.quantidade);
+                    return (
+                      <li key={m.id} className="flex flex-col gap-2 rounded-card border border-carvao/10 bg-white p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-medium">{m.produto.nome}</p>
+                            <p className="text-xs text-carvao/60">
+                              {dataHora(m.criadoEm)} · {m.usuario.nome}
+                            </p>
+                          </div>
+                          <span className={`text-2xl font-semibold tabular-nums ${delta > 0 ? 'text-oliva-700' : 'text-red-700'}`}>{sinal(delta)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Badge tom={TIPO_MOV_TOM[m.tipo]}>{TIPO_MOV_ROTULO[m.tipo]}</Badge>
+                            {m.motivo && <span className="truncate text-sm text-carvao/75">{m.motivo}</span>}
+                          </div>
+                          {podeExcluir && (
+                            <Button variante="fantasma" tamanho="sm" onClick={() => setRemovendo(m)} aria-label={`Remover movimentação de ${m.produto.nome}`}>
+                              Remover
+                            </Button>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </CartaoLista>
+              )}
+            </div>
+
+            <div className={`hidden lg:block ${tabela.caixa}`}>
               <table className={tabela.base}>
                 <thead className={tabela.cabecalho}>
                   <tr>
@@ -437,21 +518,26 @@ function FormMovimentacao({
         </Selecao>
       </Campo>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Campo rotulo="Tipo" id="mov-tipo" dica={DICA_TIPO[tipo]} obrigatorio>
-          <Selecao id="mov-tipo" value={tipo} onChange={(e) => setTipo(e.target.value as TipoMovimentacao)}>
-            {TIPOS.map((t) => (
-              <option key={t} value={t}>
-                {TIPO_MOV_ROTULO[t]}
-              </option>
-            ))}
-          </Selecao>
-        </Campo>
+      <div>
+        <p className="mb-2 text-sm font-medium">
+          Tipo<span className="text-brasa-700"> *</span>
+        </p>
+        <Segmentado
+          rotulo="Tipo"
+          className="grid-cols-2 sm:grid-cols-4"
+          opcoes={TIPOS.map((t) => ({ valor: t, rotulo: TIPO_MOV_ROTULO[t] }))}
+          valor={tipo}
+          aoMudar={setTipo}
+        />
+        <p className="mt-1 text-xs text-carvao/65">{DICA_TIPO[tipo]}</p>
+      </div>
 
+      <div className="grid gap-4 sm:grid-cols-2">
         <Campo rotulo="Quantidade" id="mov-quantidade" erro={erros.quantidade} obrigatorio>
           <Entrada
             id="mov-quantidade"
-            inputMode="numeric"
+            // O teclado numérico do tablet não tem o sinal de menos; no ajuste (que aceita negativo) abre o teclado comum.
+            inputMode={tipo === 'AJUSTE' ? 'text' : 'numeric'}
             placeholder={tipo === 'AJUSTE' ? 'Ex.: 5 ou -3' : 'Ex.: 10'}
             value={quantidade}
             onChange={(e) => setQuantidade(e.target.value)}

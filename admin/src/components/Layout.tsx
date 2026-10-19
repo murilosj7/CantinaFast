@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth, usePode } from '../auth/AuthContext';
-import type { Acao } from '../auth/permissoes';
+import { usaLayoutBalcao, type Acao } from '../auth/permissoes';
 import { PERFIL_ROTULO } from '../lib/format';
+import { IconeEstoque, IconeNovoPedido, IconePagamentos, IconePedidos, IconeSair } from './icones';
 import { Button } from './ui';
 
 interface ItemMenu {
@@ -11,6 +12,85 @@ interface ItemMenu {
   // Sem `acao`, qualquer usuário logado vê o item.
   acao?: Acao;
 }
+
+// Escolhe o layout pelo perfil (regra em auth/permissoes.ts): balcão (tablet) ou administrador (PC).
+export function Layout() {
+  const { usuario } = useAuth();
+  return usaLayoutBalcao(usuario?.perfil) ? <LayoutBalcao /> : <LayoutAdministrador />;
+}
+
+/* ---------- Balcão: Atendente e Caixa, no tablet ---------- */
+
+// Só as telas do dia a dia, com ícone e texto grandes. As demais rotas continuam existindo.
+const ITENS_BALCAO: (ItemMenu & { Icone: ComponentType<{ className?: string }> })[] = [
+  { para: '/pedidos/novo', rotulo: 'Novo pedido', acao: 'pedido.criar', Icone: IconeNovoPedido },
+  { para: '/pedidos', rotulo: 'Pedidos', acao: 'pedido.ver', Icone: IconePedidos },
+  { para: '/pagamentos', rotulo: 'Pagamentos', acao: 'pagamento.ver', Icone: IconePagamentos },
+  { para: '/estoque', rotulo: 'Estoque', acao: 'estoque.consultar', Icone: IconeEstoque },
+];
+
+function LayoutBalcao() {
+  const { usuario, sair } = useAuth();
+  const pode = usePode();
+  const visiveis = ITENS_BALCAO.filter((item) => !item.acao || pode(item.acao));
+
+  return (
+    <div className="min-h-screen">
+      <header className="bg-carvao text-creme">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <p className="font-display text-xl font-semibold tracking-tight">
+            Cantina<span className="text-brasa-400">Fast</span>
+          </p>
+          <div className="flex items-center gap-3">
+            <div className="text-right leading-tight">
+              <p className="max-w-[12rem] truncate text-sm font-medium">{usuario?.nome}</p>
+              <p className="text-xs text-creme/65">{usuario && PERFIL_ROTULO[usuario.perfil]}</p>
+            </div>
+            <button
+              type="button"
+              onClick={sair}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/25 px-3 text-sm font-medium hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-400"
+            >
+              <IconeSair className="h-5 w-5" />
+              Sair
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* pb: espaço para a barra de abas fixa não cobrir o fim da página */}
+      <main className="mx-auto max-w-6xl px-4 pb-32 pt-6 sm:px-6">
+        <Outlet />
+      </main>
+
+      <nav
+        aria-label="Principal"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-carvao/10 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(36,28,22,0.06)] backdrop-blur"
+      >
+        <ul className="mx-auto flex max-w-3xl">
+          {visiveis.map(({ para, rotulo, Icone }) => (
+            <li key={para} className="flex-1">
+              <NavLink
+                to={para}
+                end
+                className={({ isActive }) =>
+                  `mx-1 my-1.5 flex min-h-16 flex-col items-center justify-center gap-1 rounded-card text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600 ${
+                    isActive ? 'bg-brasa-50 text-brasa-700' : 'text-carvao/70 hover:bg-carvao/5'
+                  }`
+                }
+              >
+                <Icone className="h-7 w-7" />
+                {rotulo}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
+  );
+}
+
+/* ---------- Administrador: no PC ---------- */
 
 const ITENS: ItemMenu[] = [
   { para: '/pedidos/novo', rotulo: 'Novo pedido', acao: 'pedido.criar' },
@@ -25,7 +105,7 @@ const ITENS: ItemMenu[] = [
 // Áreas previstas na documentação que ainda não têm página.
 const EM_BREVE = ['Despesas', 'Fornecedores', 'BI', 'Financeiro', 'Fiscal', 'Sincronização', 'Backup', 'Configurações'];
 
-export function Layout() {
+function LayoutAdministrador() {
   const { usuario, sair } = useAuth();
   const local = useLocation();
   const [menuAberto, setMenuAberto] = useState(false);
@@ -39,10 +119,10 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen">
-      {menuAberto && <div className="fixed inset-0 z-20 bg-carvao/50 md:hidden" onClick={() => setMenuAberto(false)} aria-hidden="true" />}
+      {menuAberto && <div className="fixed inset-0 z-20 bg-carvao/50 lg:hidden" onClick={() => setMenuAberto(false)} aria-hidden="true" />}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col bg-carvao text-creme transition-transform md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col bg-carvao text-creme transition-transform lg:static lg:translate-x-0 ${
           menuAberto ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -94,12 +174,12 @@ export function Layout() {
       </aside>
 
       <div className="min-w-0 flex-1">
-        <header className="flex items-center gap-3 border-b border-carvao/10 bg-white px-4 py-3 md:hidden">
+        <header className="flex items-center gap-3 border-b border-carvao/10 bg-white px-4 py-3 lg:hidden">
           <button
             type="button"
             onClick={() => setMenuAberto(true)}
             aria-label="Abrir menu"
-            className="rounded-md border border-carvao/25 px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600"
+            className="min-h-11 rounded-md border border-carvao/25 px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600"
           >
             Menu
           </button>

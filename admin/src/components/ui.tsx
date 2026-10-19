@@ -4,6 +4,9 @@ import type { Tom } from '../lib/format';
 
 /* ---------- Botão ---------- */
 
+// Só vale em tela de toque (pointer: coarse): no PC com mouse o tamanho não muda.
+export const TOQUE = '[@media(pointer:coarse)]:min-h-11';
+
 type Variante = 'primario' | 'secundario' | 'perigo' | 'fantasma';
 
 const VARIANTES: Record<Variante, string> = {
@@ -39,11 +42,12 @@ export function Button({
   ...resto
 }: BotaoProps) {
   const medidas = tamanho === 'sm' ? 'px-2.5 py-1 text-sm' : 'px-4 py-2 text-sm';
+  // Em tela de toque (tablet) todo botão tem pelo menos 44px de altura, o mínimo confortável para o dedo.
   return (
     <button
       type={type}
       disabled={disabled || carregando}
-      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${medidas} ${VARIANTES[variante]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${TOQUE} ${medidas} ${VARIANTES[variante]} ${className}`}
       {...resto}
     >
       {carregando && <Spinner />}
@@ -57,7 +61,7 @@ export function BotaoLink({ para, variante = 'primario', children }: { para: str
   return (
     <Link
       to={para}
-      className={`inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${VARIANTES[variante]}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${TOQUE} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${VARIANTES[variante]}`}
     >
       {children}
     </Link>
@@ -66,8 +70,9 @@ export function BotaoLink({ para, variante = 'primario', children }: { para: str
 
 /* ---------- Campos de formulário ---------- */
 
+// No toque: 44px de altura e fonte de 16px (abaixo disso o navegador do tablet dá zoom ao focar o campo).
 const CAMPO =
-  'block w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-carvao/45 focus:outline-none focus:ring-2 disabled:bg-carvao/5 disabled:text-carvao/60';
+  'block w-full rounded-md border bg-white px-3 py-2 text-sm placeholder:text-carvao/45 focus:outline-none focus:ring-2 disabled:bg-carvao/5 disabled:text-carvao/60 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-base';
 const CAMPO_OK = 'border-carvao/25 focus:border-brasa-600 focus:ring-brasa-600/30';
 const CAMPO_ERRO = 'border-red-600 focus:border-red-600 focus:ring-red-600/30';
 
@@ -143,10 +148,10 @@ export function Interruptor({
   disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm">
+    <label className="flex items-center gap-2 text-sm [@media(pointer:coarse)]:min-h-11">
       <input
         type="checkbox"
-        className="h-4 w-4 accent-brasa-600"
+        className="h-4 w-4 accent-brasa-600 [@media(pointer:coarse)]:h-5 [@media(pointer:coarse)]:w-5"
         checked={marcado}
         disabled={disabled}
         onChange={(e) => aoMudar(e.target.checked)}
@@ -154,6 +159,86 @@ export function Interruptor({
       {rotulo}
     </label>
   );
+}
+
+/* ---------- Escolha entre poucas opções (no lugar de lista suspensa) ---------- */
+
+// Botões lado a lado, um selecionado. Mais rápido no toque do que abrir um <select>.
+export function Segmentado<T extends string>({
+  rotulo,
+  opcoes,
+  valor,
+  aoMudar,
+  className = 'grid-cols-2',
+}: {
+  rotulo: string;
+  opcoes: { valor: T; rotulo: string }[];
+  valor: T;
+  aoMudar: (valor: T) => void;
+  className?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={rotulo} className={`grid gap-2 ${className}`}>
+      {opcoes.map((o) => {
+        const ativo = o.valor === valor;
+        return (
+          <button
+            key={o.valor}
+            type="button"
+            role="radio"
+            aria-checked={ativo}
+            onClick={() => aoMudar(o.valor)}
+            className={`min-h-11 rounded-md border px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600 focus-visible:ring-offset-1 ${
+              ativo ? 'border-brasa-600 bg-brasa-600 text-white' : 'border-carvao/20 bg-white text-carvao hover:bg-carvao/5'
+            }`}
+          >
+            {o.rotulo}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Abas de página (Saldos/Movimentações, A receber/Recebidos).
+export function Abas<T extends string>({
+  rotulo,
+  abas,
+  valor,
+  aoMudar,
+}: {
+  rotulo: string;
+  abas: { valor: T; rotulo: string }[];
+  valor: T;
+  aoMudar: (valor: T) => void;
+}) {
+  return (
+    <div role="tablist" aria-label={rotulo} className="flex gap-1 border-b border-carvao/15">
+      {abas.map((a) => (
+        <button
+          key={a.valor}
+          type="button"
+          role="tab"
+          aria-selected={valor === a.valor}
+          onClick={() => aoMudar(a.valor)}
+          className={`-mb-px min-h-11 border-b-2 px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600 [@media(pointer:coarse)]:px-5 [@media(pointer:coarse)]:text-base ${
+            valor === a.valor ? 'border-brasa-600 text-brasa-700' : 'border-transparent text-carvao/70 hover:text-carvao'
+          }`}
+        >
+          {a.rotulo}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Cartão tocável usado no lugar da linha de tabela em telas estreitas (tablet em pé).
+export function CartaoLista({ children }: { children: ReactNode }) {
+  return <ul className="grid gap-3 sm:grid-cols-2">{children}</ul>;
+}
+
+export function MensagemVazia({ children }: { children: ReactNode }) {
+  return <p className="rounded-card border border-carvao/10 bg-white px-4 py-10 text-center text-carvao/65">{children}</p>;
 }
 
 /* ---------- Feedback ---------- */
@@ -284,7 +369,7 @@ export function Modal({
             type="button"
             onClick={aoFechar}
             aria-label="Fechar"
-            className="rounded-md px-2 py-1 text-carvao/60 hover:bg-carvao/10 hover:text-carvao focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600"
+            className="min-h-11 min-w-11 rounded-md px-2 py-1 text-carvao/60 hover:bg-carvao/10 hover:text-carvao focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600"
           >
             ✕
           </button>

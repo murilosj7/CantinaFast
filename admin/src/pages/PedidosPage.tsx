@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { DetalhePedido } from '../components/DetalhePedido';
-import { Alerta, Badge, Button, BotaoLink, LinhaMensagem, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
+import { Alerta, Badge, Button, BotaoLink, CartaoLista, LinhaMensagem, MensagemVazia, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
 import { CANAL_ROTULO, dataHora, moeda, STATUS_PEDIDO_ROTULO, STATUS_PEDIDO_TOM } from '../lib/format';
 import { useCarregar } from '../lib/useCarregar';
 import { pedidoService } from '../services/pedidoService';
@@ -39,7 +39,7 @@ export function PedidosPage() {
     <>
       <PaginaCabecalho
         titulo="Pedidos"
-        descricao="Do mais recente para o mais antigo. Clique em um pedido para ver itens e pagamentos."
+        descricao="Do mais recente para o mais antigo. Toque em um pedido para ver os detalhes."
         acao={<BotaoLink para="/pedidos/novo">Novo pedido</BotaoLink>}
       />
 
@@ -75,7 +75,41 @@ export function PedidosPage() {
           </Selecao>
         </div>
 
-        <div className={tabela.caixa}>
+        {/* Tablet e telas estreitas: um cartão por pedido; tocar abre o detalhe */}
+        <div className={`lg:hidden ${carregando && dados ? 'opacity-60' : ''}`}>
+          {!dados && carregando ? (
+            <MensagemVazia>Carregando…</MensagemVazia>
+          ) : pedidos.length === 0 ? (
+            <MensagemVazia>Nenhum pedido encontrado com esses filtros.</MensagemVazia>
+          ) : (
+            <CartaoLista>
+              {pedidos.map((p) => {
+                const itens = p.itens.reduce((soma, i) => soma + i.quantidade, 0);
+                return (
+                  <li key={p.id}>
+                    <button type="button" onClick={() => setAberto(p.id)} aria-label={`Ver pedido ${p.id}`} className="flex w-full flex-col gap-2 rounded-card border border-carvao/10 bg-white p-4 text-left transition-colors hover:border-carvao/25 active:bg-carvao/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-lg font-semibold">#{p.id}</span>
+                        <Badge tom={STATUS_PEDIDO_TOM[p.status]}>{STATUS_PEDIDO_ROTULO[p.status]}</Badge>
+                      </span>
+                      <span className="flex items-end justify-between gap-2">
+                        <span className="flex flex-col text-sm text-carvao/70">
+                          <span>{dataHora(p.criadoEm)}</span>
+                          <span>
+                            {CANAL_ROTULO[p.canal]} · {itens} {itens === 1 ? 'item' : 'itens'}
+                          </span>
+                        </span>
+                        <span className="text-lg font-semibold tabular-nums">{moeda(p.total)}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </CartaoLista>
+          )}
+        </div>
+
+        <div className={`hidden lg:block ${tabela.caixa}`}>
           <table className={tabela.base}>
             <thead className={tabela.cabecalho}>
               <tr>

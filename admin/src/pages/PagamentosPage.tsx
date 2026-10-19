@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { DetalhePedido } from '../components/DetalhePedido';
-import { Alerta, Badge, Button, LinhaMensagem, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
+import { Abas, Alerta, Badge, Button, CartaoLista, LinhaMensagem, MensagemVazia, Modal, PaginaCabecalho, Segmentado, tabela } from '../components/ui';
 import {
   CANAL_ROTULO,
   dataHora,
@@ -48,32 +48,23 @@ export function PagamentosPage() {
   // Muda quando um pagamento é registrado no modal: as listas são remontadas e recarregam.
   const [versao, setVersao] = useState(0);
 
-  const botaoAba = (id: Aba, rotulo: string) => (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={aba === id}
-      onClick={() => setAba(id)}
-      className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600 ${
-        aba === id ? 'border-brasa-600 text-brasa-700' : 'border-transparent text-carvao/70 hover:text-carvao'
-      }`}
-    >
-      {rotulo}
-    </button>
-  );
-
   return (
     <>
       <PaginaCabecalho
         titulo="Pagamentos"
-        descricao="Receba os pedidos que ainda não foram pagos e consulte os pagamentos já registrados. O pagamento é registrado como aprovado, no valor exato do pedido."
+        descricao="Toque em um pedido para receber. O pagamento é registrado como aprovado, no valor exato do pedido."
       />
 
       <div className="space-y-4">
-        <div role="tablist" aria-label="Pagamentos" className="flex gap-1 border-b border-carvao/15">
-          {botaoAba('receber', 'A receber')}
-          {botaoAba('recebidos', 'Recebidos')}
-        </div>
+        <Abas
+          rotulo="Pagamentos"
+          abas={[
+            { valor: 'receber', rotulo: 'A receber' },
+            { valor: 'recebidos', rotulo: 'Recebidos' },
+          ]}
+          valor={aba}
+          aoMudar={setAba}
+        />
 
         {aba === 'receber' ? (
           <AReceber key={`receber-${versao}`} aoAbrir={setAberto} />
@@ -83,7 +74,7 @@ export function PagamentosPage() {
       </div>
 
       <Modal aberto={aberto !== null} titulo={aberto ? `Pedido #${aberto}` : 'Pedido'} aoFechar={() => setAberto(null)} largura="max-w-3xl">
-        {aberto !== null && <DetalhePedido id={aberto} aoAlterar={() => setVersao((v) => v + 1)} />}
+        {aberto !== null && <DetalhePedido id={aberto} aoAlterar={() => setVersao((v) => v + 1)} pagarDireto={aba === 'receber'} />}
       </Modal>
     </>
   );
@@ -113,7 +104,35 @@ function AReceber({ aoAbrir }: { aoAbrir: (id: number) => void }) {
         </p>
       )}
 
-      <div className={tabela.caixa}>
+      <div className={`lg:hidden ${carregando && dados ? 'opacity-60' : ''}`}>
+        {!dados && carregando ? (
+          <MensagemVazia>Carregando…</MensagemVazia>
+        ) : pedidos.length === 0 ? (
+          <MensagemVazia>Nenhum pedido aguardando pagamento.</MensagemVazia>
+        ) : (
+          <CartaoLista>
+            {pedidos.map((p) => (
+              <li key={p.id}>
+                <button type="button" onClick={() => aoAbrir(p.id)} aria-label={`Receber pedido ${p.id}`} className="flex w-full flex-col gap-2 rounded-card border border-carvao/10 bg-white p-4 text-left transition-colors hover:border-carvao/25 active:bg-carvao/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-lg font-semibold">#{p.id}</span>
+                    <Badge tom={STATUS_PEDIDO_TOM[p.status]}>{STATUS_PEDIDO_ROTULO[p.status]}</Badge>
+                  </span>
+                  <span className="text-sm text-carvao/70">
+                    {dataHora(p.criadoEm)} · {CANAL_ROTULO[p.canal]} · {quantidadeItens(p)} {quantidadeItens(p) === 1 ? 'item' : 'itens'}
+                  </span>
+                  <span className="mt-1 flex items-center justify-between gap-2">
+                    <span className="text-2xl font-semibold tabular-nums">{moeda(p.total)}</span>
+                    <span className="inline-flex min-h-11 items-center rounded-md bg-brasa-600 px-4 text-sm font-semibold text-white">Receber</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </CartaoLista>
+        )}
+      </div>
+
+      <div className={`hidden lg:block ${tabela.caixa}`}>
         <table className={tabela.base}>
           <thead className={tabela.cabecalho}>
             <tr>
@@ -206,15 +225,14 @@ function Recebidos({ aoAbrir }: { aoAbrir: (id: number) => void }) {
         </Alerta>
       )}
 
-      <div className="grid items-center gap-3 sm:grid-cols-[12rem_1fr]">
-        <Selecao aria-label="Filtrar por forma de pagamento" value={forma} onChange={(e) => setForma(e.target.value as FormaPagamento | '')}>
-          <option value="">Todas as formas</option>
-          {FORMAS.map((f) => (
-            <option key={f} value={f}>
-              {FORMA_PAGAMENTO_ROTULO[f]}
-            </option>
-          ))}
-        </Selecao>
+      <div className="grid items-center gap-3 md:grid-cols-[26rem_1fr]">
+        <Segmentado
+          rotulo="Filtrar por forma de pagamento"
+          className="grid-cols-4"
+          opcoes={[{ valor: '' as FormaPagamento | '', rotulo: 'Todas' }, ...FORMAS.map((f) => ({ valor: f as FormaPagamento | '', rotulo: FORMA_PAGAMENTO_ROTULO[f] }))]}
+          valor={forma}
+          aoMudar={setForma}
+        />
         {!carregando && (
           <p className="text-sm text-carvao/75">
             {aprovados.length} {aprovados.length === 1 ? 'pagamento aprovado' : 'pagamentos aprovados'} nesta página · {moeda(somarCentavos(aprovados.map((pg) => pg.valor)))}
@@ -222,7 +240,38 @@ function Recebidos({ aoAbrir }: { aoAbrir: (id: number) => void }) {
         )}
       </div>
 
-      <div className={tabela.caixa}>
+      <div className={`lg:hidden ${carregando && pagamentosQ.dados ? 'opacity-60' : ''}`}>
+        {carregando && !pagamentosQ.dados ? (
+          <MensagemVazia>Carregando…</MensagemVazia>
+        ) : linhas.length === 0 ? (
+          <MensagemVazia>Nenhum pagamento registrado com esses filtros.</MensagemVazia>
+        ) : (
+          <CartaoLista>
+            {linhas.map((pg) => {
+              const pedido = porId.get(pg.pedidoId);
+              return (
+                <li key={pg.id}>
+                  <button type="button" onClick={() => aoAbrir(pg.pedidoId)} aria-label={`Ver pedido ${pg.pedidoId}`} className="flex w-full flex-col gap-2 rounded-card border border-carvao/10 bg-white p-4 text-left transition-colors hover:border-carvao/25 active:bg-carvao/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa-600">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-lg font-semibold">Pedido #{pg.pedidoId}</span>
+                      <Badge tom={STATUS_PAGAMENTO_TOM[pg.statusPagamento]}>{STATUS_PAGAMENTO_ROTULO[pg.statusPagamento]}</Badge>
+                    </span>
+                    <span className="flex items-end justify-between gap-2">
+                      <span className="text-sm text-carvao/70">
+                        {FORMA_PAGAMENTO_ROTULO[pg.formaPagamento]} · {dataHora(pg.criadoEm)}
+                        {pedido && <> · {STATUS_PEDIDO_ROTULO[pedido.status]}</>}
+                      </span>
+                      <span className="text-lg font-semibold tabular-nums">{moeda(pg.valor)}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </CartaoLista>
+        )}
+      </div>
+
+      <div className={`hidden lg:block ${tabela.caixa}`}>
         <table className={tabela.base}>
           <thead className={tabela.cabecalho}>
             <tr>

@@ -49,3 +49,18 @@ export function podeFazer(perfil: Perfil | null | undefined, acao: Acao): boolea
   if (!perfil) return false;
   return MATRIZ[acao].includes(perfil);
 }
+
+// ---- Interface por perfil (não é permissão: só onde e como cada perfil trabalha) ----
+
+// Atendente e Caixa usam o painel no tablet, no balcão: abas grandes embaixo e só as telas do dia a dia.
+// O Administrador usa no PC, com o menu lateral completo.
+export function usaLayoutBalcao(perfil: Perfil | null | undefined): boolean {
+  return perfil === 'atendente' || perfil === 'caixa';
+}
+
+// Tela que abre logo depois do login.
+export function telaInicial(perfil: Perfil | null | undefined): string {
+  if (perfil === 'atendente') return '/pedidos/novo';
+  if (perfil === 'caixa') return '/pagamentos';
+  return '/pedidos';
+}
