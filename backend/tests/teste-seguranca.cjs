@@ -208,6 +208,16 @@ L.executar(t, async () => {
       t.sucesso(await login({ login: cx.login, senha }));
       t.sucesso(await t.http('GET', '/health'));
     });
+    // O balde "sem-alvo" já está esgotado pelo caso anterior: login vazio ou só com espaços cai nele (não num balde próprio).
+    await t.caso('login vazio ou só com espaços usa o MESMO balde "sem-alvo" (429, não 400)', async () => {
+      L.erro(await login({ login: '', senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await login({ login: '   ', senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
+    });
+    await t.caso('o alvo do login interno é cortado em 120 caracteres: dois logins iguais nos 120 primeiros dividem o contador (6º → 429)', async () => {
+      const base = (t.unico('longo') + 'y'.repeat(200)).slice(0, 120);
+      for (let i = 0; i < 5; i++) t.verdade((await login({ login: `${base}${i}`, senha: 'x' })).status < 429);
+      L.erro(await login({ login: `${base}fim`, senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
+    });
     await t.caso('o bloqueio do login não afeta as outras rotas (GET /health e /interno/me seguem 200)', async () => {
       t.sucesso(await t.http('GET', '/health'));
       t.sucesso(await me(adm.token));
@@ -593,6 +603,16 @@ L.executar(t, async () => {
       t.sucesso(await loginCli(cliC.email));
       t.sucesso(await t.http('POST', '/interno/login', { body: { login: adm.login, senha } }));
     });
+    // O balde "sem-alvo" já está esgotado pelo caso anterior: e-mail vazio ou só com espaços cai nele (não num balde próprio).
+    await t.caso('e-mail vazio ou só com espaços usa o MESMO balde "sem-alvo" (429, não 400)', async () => {
+      L.erro(await t.http('POST', '/clientes/login', { body: { email: '', senha: 'x' } }), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await t.http('POST', '/clientes/login', { body: { email: '   ', senha: 'x' } }), 429, { mensagem: MSG_LOGIN_429 });
+    });
+    await t.caso('o alvo do e-mail é cortado em 160 caracteres: dois e-mails iguais nos 160 primeiros dividem o contador (6º → 429)', async () => {
+      const base = (t.unico('longo') + 'x'.repeat(300)).slice(0, 160);
+      for (let i = 0; i < 5; i++) t.verdade((await loginCli(`${base}${i}`, 'errada-1')).status < 429);
+      L.erro(await loginCli(`${base}fim`, 'errada-1'), 429, { mensagem: MSG_LOGIN_429 });
+    });
     await t.caso('estourar o login do CLIENTE não bloqueia o login INTERNO (contadores separados)', async () => {
       L.erro(await login({ login: adm.login, senha: 'errada' }), 401, { mensagem: 'Login ou senha inválidos.' });
       t.sucesso(await login({ login: adm.login, senha }));
@@ -743,7 +763,7 @@ L.executar(t, async () => {
       });
     }
     // Inválida: nunca aceita true nem listas; avisa no log e NÃO confia em nada (forjar o X-Forwarded-For não ajuda).
-    for (const valor of ['true', 'false', '0', '-1', '1.5', '1e3', '11', '100', 'abc', '1,2', '1 2', 'loopback', '127.0.0.1', '0x2', '+1']) {
+    for (const valor of ['true', 'false', '0', '-1', '1.5', '1e3', '11', '100', 'abc', '1,2', '1 2', 'loopback', '127.0.0.1', '0x2', '+1', '1.0', '2.0', '1e1']) {
       await subFase(`TRUST_PROXY=${JSON.stringify(valor)}`, { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '', TRUST_PROXY: valor }, async (s) => {
         await t.caso(`TRUST_PROXY=${JSON.stringify(valor)} é inválida: avisa no log, não confia em nada e o X-Forwarded-For é ignorado`, async () => {
           t.verdade(s.log.includes('TRUST_PROXY inválida'), s.log);
