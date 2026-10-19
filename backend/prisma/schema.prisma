@@ -137,6 +137,7 @@ model Pedido {
   criadoEm   DateTime     @default(now())
 
   usuario    Usuario      @relation(fields: [usuarioId], references: [id])
+  cliente    Cliente?     @relation(fields: [clienteId], references: [id], onDelete: Restrict)
   itens      ItemPedido[]
   pagamentos Pagamento[]
 
@@ -169,4 +170,18 @@ model Pagamento {
   pedido Pedido @relation(fields: [pedidoId], references: [id])
 
   @@map("pagamentos")
+}
+
+model Cliente {
+  id          Int     @id @default(autoincrement())
+  nome        String  @db.VarChar(120)
+  telefone    String? @db.VarChar(20)
+  email       String? @unique @db.VarChar(160)
+  senhaHash   String? @db.VarChar(255)
+  loginGoogle String? @db.VarChar(255)
+  ativo       Boolean @default(true)
+
+  pedidos Pedido[]
+
+  @@map("clientes")
 }

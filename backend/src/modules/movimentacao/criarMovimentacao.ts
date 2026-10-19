@@ -45,7 +45,7 @@ function lerQuantidade(valor: unknown, tipo: TipoMovimentacaoEstoque): number {
 }
 
 // POST /movimentacoes — body: { produtoId, tipo: "ENTRADA" | "SAIDA" | "PERDA" | "AJUSTE", quantidade, motivo? }.
-// Rota protegida (qualquer perfil logado). O usuário gravado é SEMPRE o do token: um `usuarioId` enviado no corpo é ignorado.
+// Rota protegida (os três perfis internos). O usuário gravado é SEMPRE o do token: um `usuarioId` enviado no corpo é ignorado.
 //  - ENTRADA soma `quantidade` ao estoque físico; SAIDA e PERDA subtraem; AJUSTE soma o valor com sinal (delta).
 //  - O físico nunca fica negativo: se a operação deixaria, responde 400 informando o saldo atual.
 //  - Produto antigo sem linha em `estoque` ganha a linha zerada (e, se a operação falhar, a linha também é desfeita).

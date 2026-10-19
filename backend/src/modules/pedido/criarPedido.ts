@@ -8,7 +8,7 @@ import { prisma } from "../../config/prisma";
 import { AppError } from "../../middlewares/errorHandler";
 // Valida ids (aqui, o produtoId de cada item).
 import { parseId } from "../../utils/parseId";
-// pedidoCompletoInclude carrega itens e pagamentos; paraPedido monta a resposta.
+// pedidoCompletoInclude carrega itens e pagamentos; paraPedido monta a resposta (e tira os pagamentos do Atendente).
 import { paraPedido, pedidoCompletoInclude } from "./pedido.mapper";
 
 // Máximo de linhas (produtos diferentes) por pedido, para não aceitar pedidos absurdos.
@@ -80,6 +80,8 @@ export async function criarPedido(req: Request, res: Response) {
   }
   // Id de quem está criando o pedido, vindo do token (nunca do corpo da requisição).
   const usuarioId = req.usuario.id;
+  // Perfil do token (lido do banco): o Atendente não recebe pagamentos na resposta.
+  const perfil = req.usuario.perfil;
 
   // Lê e valida o corpo antes de abrir a transação (erros de formato não precisam do banco).
   const { canal, itens: itensBrutos } = req.body ?? {};
@@ -207,5 +209,5 @@ export async function criarPedido(req: Request, res: Response) {
   );
 
   // Responde 201 (criado) com o pedido no formato da API.
-  res.status(201).json(paraPedido(pedido));
+  res.status(201).json(paraPedido(pedido, perfil));
 }

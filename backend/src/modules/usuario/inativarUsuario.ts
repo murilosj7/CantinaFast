@@ -7,7 +7,7 @@ import { AppError } from "../../middlewares/errorHandler";
 // Valida o id que veio na URL.
 import { parseId } from "../../utils/parseId";
 // Regra de negócio: impede tirar o último administrador ativo.
-import { garantirUltimoAdministrador } from "./garantirUltimoAdministrador";
+import { garantirUltimoAdministrador, travarAdministradoresAtivos } from "./garantirUltimoAdministrador";
 // Monta a resposta do usuário no formato do contrato.
 import { paraUsuarioInterno } from "./usuario.mapper";
 
@@ -18,22 +18,33 @@ export async function inativarUsuario(req: Request, res: Response) {
   // Lê o :id da URL e valida.
   const id = parseId(req.params.id);
 
-  // Busca o usuário atual no banco.
-  const usuario = await prisma.usuario.findUnique({ where: { id } });
+  // Checagem rápida de existência (404) sem abrir transação. NÃO serve para decidir a regra do administrador:
+  // esse estado pode estar velho quando a transação começar.
+  const existente = await prisma.usuario.findUnique({ where: { id }, select: { id: true } });
   // Se não existe, 404.
-  if (!usuario) {
+  if (!existente) {
     throw new AppError("Usuário não encontrado.", 404);
   }
 
-  // Se ele for o último administrador ativo, essa função lança 409 e a inativação é barrada.
-  await garantirUltimoAdministrador(usuario, { perfil: usuario.perfil, ativo: false });
-
-  // Marca como inativo (ativo = false) em vez de apagar o registro.
-  const inativado = await prisma.usuario.update({
-    where: { id },
-    data: { ativo: false },
-    // Não traz o senhaHash.
-    omit: { senhaHash: true },
+  // Tudo numa transação: travar, reler, conferir a regra e gravar. Sempre trava, porque a leitura de fora
+  // pode estar velha (ex.: o alvo virou administrador por outra requisição no meio do caminho).
+  const inativado = await prisma.$transaction(async (tx) => {
+    // 1º) trava os administradores ativos (ordem fixa de id). Nunca travar o alvo antes disso (risco de deadlock).
+    await travarAdministradoresAtivos(tx);
+    // 2º) relê o alvo já com a trava: este é o estado que vale para decidir.
+    const usuario = await tx.usuario.findUnique({ where: { id } });
+    if (!usuario) {
+      throw new AppError("Usuário não encontrado.", 404);
+    }
+    // Se ele for o último administrador ativo, essa função lança 409 e a inativação é barrada.
+    await garantirUltimoAdministrador(tx, usuario, { perfil: usuario.perfil, ativo: false });
+    // Marca como inativo (ativo = false) em vez de apagar o registro.
+    return tx.usuario.update({
+      where: { id },
+      data: { ativo: false },
+      // Não traz o senhaHash.
+      omit: { senhaHash: true },
+    });
   });
 
   // Devolve o usuário já inativado no formato do contrato.

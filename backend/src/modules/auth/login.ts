@@ -7,7 +7,7 @@ import jwt from "jsonwebtoken";
 // Instância única do Prisma para acessar o banco.
 import { prisma } from "../../config/prisma";
 // Segredo, algoritmo e validade do token (vêm do .env / config).
-import { JWT_ALGORITMO, JWT_EXPIRA_EM, JWT_SECRET } from "../../config/jwt";
+import { AUD_INTERNO, JWT_ALGORITMO, JWT_EXPIRA_EM, JWT_SECRET, TIPO_USUARIO } from "../../config/jwt";
 // Erro padronizado (mensagem + status + campo).
 import { AppError } from "../../middlewares/errorHandler";
 // Monta o usuário no formato UsuarioInterno do contrato (sem senhaHash).
@@ -41,8 +41,9 @@ export async function login(req: Request, res: Response) {
     throw new AppError(MENSAGEM_LOGIN_INVALIDO, 401);
   }
 
-  // Gera o token JWT com id e perfil no payload, assinado com o segredo e com prazo de validade.
-  const token = jwt.sign({ id: usuario.id, perfil: usuario.perfil }, JWT_SECRET, {
+  // Gera o token JWT com id, perfil e a identificação do lado (tipo "usuario", aud "interno") no payload,
+  // assinado com o segredo e com prazo de validade. O tipo/aud impedem que um token de cliente valha aqui (e vice-versa).
+  const token = jwt.sign({ id: usuario.id, perfil: usuario.perfil, tipo: TIPO_USUARIO, aud: AUD_INTERNO }, JWT_SECRET, {
     // Algoritmo de assinatura.
     algorithm: JWT_ALGORITMO,
     // Depois desse prazo o token deixa de valer.

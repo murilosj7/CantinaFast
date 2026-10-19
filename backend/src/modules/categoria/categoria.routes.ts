@@ -1,7 +1,8 @@
 // Router do Express: agrupa as rotas deste módulo num "mini-servidor" que o server.ts pluga.
 import { Router } from "express";
 // Middleware que exige token JWT válido (rotas que alteram dados).
-import { autenticar } from "../../middlewares/auth.middleware";
+import { autenticar, exigirPerfil } from "../../middlewares/auth.middleware";
+import { SO_ADMIN } from "../../config/permissoes";
 // Cada ação do módulo mora no seu próprio arquivo; aqui só ligamos cada rota à sua função.
 import { criarCategoria } from "./criarCategoria";
 import { listarCategorias } from "./listarCategorias";
@@ -12,10 +13,10 @@ import { inativarCategoria } from "./inativarCategoria";
 export const categoriaRoutes = Router();
 
 // POST /categorias -> cadastra uma categoria. PROTEGIDA: precisa de token.
-categoriaRoutes.post("/", autenticar, criarCategoria);
+categoriaRoutes.post("/", autenticar, exigirPerfil(...SO_ADMIN), criarCategoria);
 // GET /categorias -> lista (com filtros). Pública: o catálogo do site consulta sem login.
 categoriaRoutes.get("/", listarCategorias);
 // PATCH /categorias/:id -> atualiza campos da categoria (inclusive ativa). PROTEGIDA.
-categoriaRoutes.patch("/:id", autenticar, atualizarCategoria);
+categoriaRoutes.patch("/:id", autenticar, exigirPerfil(...SO_ADMIN), atualizarCategoria);
 // PATCH /categorias/:id/inativar -> atalho para inativar. PROTEGIDA.
-categoriaRoutes.patch("/:id/inativar", autenticar, inativarCategoria);
+categoriaRoutes.patch("/:id/inativar", autenticar, exigirPerfil(...SO_ADMIN), inativarCategoria);

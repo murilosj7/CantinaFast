@@ -1,4 +1,6 @@
 // Seed de DEMONSTRAÇÃO (só para ambiente local). Rode com: npm run seed:demo
+// Duas travas o recusam antes de tocar no banco: NODE_ENV=production (sem diferenciar maiúsculas/espaços) e DATABASE_URL
+// com host que não seja localhost/127.0.0.1 (ausente ou ilegível também recusa, mesmo sem NODE_ENV).
 // Cria categorias, produtos (já com estoque e movimentação de entrada), dois usuários de teste e alguns pedidos
 // (uns abertos, uns pagos) para as telas do sistema terem o que mostrar.
 // É idempotente: rodar de novo não duplica nada (categoria por nome, produto por código de barras/nome, usuário por login).
@@ -22,6 +24,18 @@ import { registrarPagamento } from "../modules/pagamento/registrarPagamento";
 
 // Senha dos usuários de demonstração quando SEED_DEMO_SENHA não é informada (é só ambiente local de demo).
 const SENHA_PADRAO_DEMO = "demo1234";
+
+// Hosts considerados "banco local" (mesma regra do runner dos testes).
+const HOSTS_LOCAIS = ["localhost", "127.0.0.1"];
+
+// Host do DATABASE_URL; devolve "" se a URL estiver ausente ou não puder ser lida.
+function hostDoBanco(url: string | undefined): string {
+  try {
+    return new URL(url ?? "").hostname;
+  } catch {
+    return "";
+  }
+}
 
 // Categorias da demonstração.
 const CATEGORIAS = ["Salgados", "Bebidas", "Doces", "Almoço"];
@@ -82,8 +96,13 @@ async function chamar(handler: Handler, usuario: UsuarioDemo | undefined, body: 
 // Faz o trabalho do seed; qualquer erro lançado aqui é tratado no final do arquivo.
 async function seedDemo() {
   // Trava de segurança: esta demo cria usuários com senha de demonstração, nunca deve rodar em produção.
-  if (process.env.NODE_ENV === "production") {
+  // Aparado e em minúsculas, para "Production" ou "production " também serem barrados.
+  if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
     throw new Error("O seed de demonstração não roda com NODE_ENV=production.");
+  }
+  // Segunda trava, independente do NODE_ENV (que pode estar ausente): só roda em banco local. URL ausente ou ilegível também recusa.
+  if (!HOSTS_LOCAIS.includes(hostDoBanco(process.env.DATABASE_URL))) {
+    throw new Error("O seed de demonstração só roda em banco local (localhost ou 127.0.0.1); confira o DATABASE_URL.");
   }
 
   // Senha dos usuários de teste: SEED_DEMO_SENHA se informada (não vazia), senão o padrão de demonstração.

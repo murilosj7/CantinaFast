@@ -1,7 +1,8 @@
 // Router do Express: agrupa as rotas deste módulo num "mini-servidor" que o server.ts pluga.
 import { Router } from "express";
 // Middleware que exige token JWT válido.
-import { autenticar } from "../../middlewares/auth.middleware";
+import { autenticar, exigirPerfil } from "../../middlewares/auth.middleware";
+import { TODOS_INTERNOS } from "../../config/permissoes";
 // Cada ação do módulo mora no seu próprio arquivo; aqui só ligamos cada rota à sua função.
 import { criarPedido } from "./criarPedido";
 import { listarPedidos } from "./listarPedidos";
@@ -11,7 +12,7 @@ import { buscarPedidoPorId } from "./buscarPedidoPorId";
 export const pedidoRoutes = Router();
 
 // TODAS as rotas deste módulo exigem token (qualquer perfil logado pode criar e ver pedidos).
-pedidoRoutes.use(autenticar);
+pedidoRoutes.use(autenticar, exigirPerfil(...TODOS_INTERNOS));
 
 // POST /pedidos -> cria um pedido com seus itens e dá baixa no estoque.
 pedidoRoutes.post("/", criarPedido);
