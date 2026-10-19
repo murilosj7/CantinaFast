@@ -8,6 +8,9 @@
 //   caixa / 123456     (caixa)
 //   atendente / 123456 (atendente)
 //   paula / 123456     (atendente INATIVA: o login deve ser recusado)
+//
+// Segue a matriz de permissões do backend (403 por perfil) e o limite de login (429 com Retry-After).
+// No mock o limite de login é 5 falhas por IP em 60 s (no backend real a janela é de 15 min), para dar para testar.
 
 import http from 'node:http';
 
@@ -80,10 +83,11 @@ const pedidos = Array.from({ length: 27 }, (_, i) => {
 /* ---------- Utilidades ---------- */
 
 class ApiErro extends Error {
-  constructor(status, mensagem, campo) {
+  constructor(status, mensagem, campo, headers) {
     super(mensagem);
     this.status = status;
     this.campo = campo;
+    this.headers = headers;
   }
 }
 
@@ -126,8 +130,42 @@ function autenticar(req) {
   return usuario;
 }
 
+// Mesma matriz do backend (config/permissoes.ts).
+const SO_ADMIN = ['administrador'];
+const ADMIN_E_CAIXA = ['administrador', 'caixa'];
+const TODOS_INTERNOS = ['administrador', 'caixa', 'atendente'];
+
+// Autentica e confere o perfil: sem token -> 401; perfil fora da lista -> 403.
+function exigir(req, perfis) {
+  const usuario = autenticar(req);
+  if (!perfis.includes(usuario.perfil)) throw new ApiErro(403, 'Você não tem permissão para realizar esta ação.');
+  return usuario;
+}
+
 function exigirAdministrador(usuario) {
   if (usuario.perfil !== 'administrador') throw new ApiErro(403, 'Você não tem permissão para realizar esta ação.');
+}
+
+// Limite de login: falhas por IP numa janela curta; ao estourar, 429 com Retry-After (em segundos).
+const LIMITE_LOGIN = 5;
+const JANELA_LOGIN_MS = 60 * 1000;
+const falhasLogin = new Map(); // ip -> { quantidade, fim }
+
+function conferirLimiteLogin(req) {
+  const registro = falhasLogin.get(req.socket.remoteAddress);
+  if (!registro || registro.fim <= Date.now()) return;
+  if (registro.quantidade >= LIMITE_LOGIN) {
+    const segundos = Math.max(1, Math.ceil((registro.fim - Date.now()) / 1000));
+    throw new ApiErro(429, 'Muitas tentativas de login. Tente novamente em alguns minutos.', undefined, { 'Retry-After': String(segundos) });
+  }
+}
+
+function registrarFalhaLogin(req) {
+  const ip = req.socket.remoteAddress;
+  const agora = Date.now();
+  const registro = falhasLogin.get(ip);
+  if (!registro || registro.fim <= agora) falhasLogin.set(ip, { quantidade: 1, fim: agora + JANELA_LOGIN_MS });
+  else registro.quantidade += 1;
 }
 
 function lerPerfil(valor) {
@@ -191,16 +229,21 @@ function garantirCodigoLivre(codigo, ignorarId) {
 const rotas = [];
 const rota = (metodo, caminho, funcao) => rotas.push([metodo, new RegExp(`^${caminho}$`), funcao]);
 
-rota('GET', '/health', () => ({ corpo: { status: 'ok (mock)', totalUsuarios: usuarios.length } }));
+rota('GET', '/health', () => ({ corpo: { status: 'ok' } }));
 
 // --- auth ---
 rota('POST', '/interno/login', (req, body) => {
+  conferirLimiteLogin(req);
   const { login, senha } = body ?? {};
   if (typeof login !== 'string' || typeof senha !== 'string' || login.trim() === '' || senha === '') {
+    registrarFalhaLogin(req);
     throw new ApiErro(400, 'Informe login e senha.');
   }
   const u = usuarios.find((x) => x.login === login.trim());
-  if (!u || !u.ativo || u.senha !== senha) throw new ApiErro(401, 'Login ou senha inválidos.');
+  if (!u || !u.ativo || u.senha !== senha) {
+    registrarFalhaLogin(req);
+    throw new ApiErro(401, 'Login ou senha inválidos.');
+  }
   return { corpo: { usuario: paraUsuario(u), token: `mock-${u.id}` } };
 });
 
@@ -208,7 +251,7 @@ rota('GET', '/interno/me', (req) => ({ corpo: paraUsuario(autenticar(req)) }));
 
 // --- usuários ---
 rota('GET', '/interno/usuarios', (req, body, p, q) => {
-  autenticar(req);
+  exigir(req, SO_ADMIN);
   let lista = usuarios;
   const busca = (q.get('busca') ?? '').trim().toLowerCase();
   if (busca) lista = lista.filter((u) => u.nome.toLowerCase().includes(busca) || u.login.toLowerCase().includes(busca));
@@ -238,7 +281,7 @@ rota('POST', '/interno/usuarios', (req, body) => {
 });
 
 rota('GET', '/interno/usuarios/(\\d+)', (req, body, p) => {
-  autenticar(req);
+  exigir(req, SO_ADMIN);
   const u = usuarios.find((x) => x.id === parseId(p[1]));
   if (!u) throw new ApiErro(404, 'Usuário não encontrado.');
   return { corpo: paraUsuario(u) };
@@ -288,7 +331,7 @@ rota('GET', '/categorias', (req, body, p, q) => {
 });
 
 rota('POST', '/categorias', (req, body) => {
-  autenticar(req);
+  exigir(req, SO_ADMIN);
   const { nome } = body ?? {};
   if (typeof nome !== 'string' || nome.trim() === '' || nome.trim().length > 80) throw new ApiErro(400, 'Informe o nome da categoria (até 80 caracteres).', 'nome');
   const nova = { id: proximoId(categorias), nome: nome.trim(), ativa: true };
@@ -297,7 +340,7 @@ rota('POST', '/categorias', (req, body) => {
 });
 
 rota('PATCH', '/categorias/(\\d+)', (req, body, p) => {
-  autenticar(req);
+  exigir(req, SO_ADMIN);
   const c = categorias.find((x) => x.id === parseId(p[1]));
   if (!c) throw new ApiErro(404, 'Categoria não encontrada.');
   const { nome, ativa } = body ?? {};
@@ -339,7 +382,7 @@ rota('GET', '/produtos/(\\d+)', (req, body, p) => {
 });
 
 rota('POST', '/produtos', (req, body) => {
-  autenticar(req);
+  exigir(req, SO_ADMIN);
   const b = body ?? {};
   const quantidade = b.quantidadeInicial ?? 0;
   if (typeof quantidade !== 'number' || !Number.isInteger(quantidade) || quantidade < 0) {
@@ -365,7 +408,7 @@ rota('POST', '/produtos', (req, body) => {
 });
 
 rota('PATCH', '/produtos/(\\d+)', (req, body, p) => {
-  autenticar(req);
+  exigir(req, SO_ADMIN);
   const produto = produtos.find((x) => x.id === parseId(p[1]));
   if (!produto) throw new ApiErro(404, 'Produto não encontrado.');
   const b = body ?? {};
@@ -394,7 +437,7 @@ rota('PATCH', '/produtos/(\\d+)', (req, body, p) => {
 
 // --- pedidos (todas exigem token) ---
 rota('GET', '/pedidos', (req, body, p, q) => {
-  autenticar(req);
+  exigir(req, TODOS_INTERNOS);
   const inteiro = (campo, padrao, min, max) => {
     const v = q.get(campo);
     if (v === null || v === '') return padrao;
@@ -418,8 +461,9 @@ rota('GET', '/pedidos', (req, body, p, q) => {
   return { corpo: { dados, pagina, limite, total: lista.length, totalPaginas: Math.ceil(lista.length / limite) } };
 });
 
+// Como no backend real HOJE: devolve os pagamentos para qualquer perfil (quem esconde do Atendente é o front).
 rota('GET', '/pedidos/(\\d+)', (req, body, p) => {
-  autenticar(req);
+  exigir(req, TODOS_INTERNOS);
   const pedido = pedidos.find((x) => x.id === parseId(p[1]));
   if (!pedido) throw new ApiErro(404, 'Pedido não encontrado.');
   return { corpo: pedido };
@@ -427,7 +471,7 @@ rota('GET', '/pedidos/(\\d+)', (req, body, p) => {
 
 // POST /pedidos: mesmas validações do backend (canal, itens, produto ativo, estoque) e baixa de estoque.
 rota('POST', '/pedidos', (req, body) => {
-  const usuario = autenticar(req);
+  const usuario = exigir(req, TODOS_INTERNOS);
   const { canal, itens } = body ?? {};
   const canalLido = typeof canal === 'string' ? canal.trim().toUpperCase() : '';
   if (!['PRESENCIAL', 'ONLINE'].includes(canalLido)) throw new ApiErro(400, 'Canal inválido. Use: PRESENCIAL ou ONLINE.', 'canal');
@@ -471,7 +515,7 @@ rota('POST', '/pedidos', (req, body) => {
   return { status: 201, corpo: novo };
 });
 
-// --- pagamentos (todas exigem token; qualquer perfil) ---
+// --- pagamentos (Administrador e Caixa) ---
 // Igual ao backend: um pagamento com o valor EXATO do pedido, já APROVADO, e o pedido vira PAGO.
 const STATUS_PAGAVEIS = ['ABERTO', 'ENVIADO_AO_CAIXA', 'AGUARDANDO_PAGAMENTO'];
 
@@ -482,7 +526,7 @@ function garantirPedidoPagavel(status) {
 }
 
 rota('POST', '/pagamentos', (req, body) => {
-  autenticar(req);
+  exigir(req, ADMIN_E_CAIXA);
   const { pedidoId: pedidoIdBruto, formaPagamento, valor } = body ?? {};
   const pedidoId = parseId(pedidoIdBruto, 'pedidoId');
   const forma = typeof formaPagamento === 'string' ? formaPagamento.trim().toUpperCase() : '';
@@ -505,14 +549,15 @@ rota('POST', '/pagamentos', (req, body) => {
 });
 
 rota('GET', '/pagamentos/pedido/(\\d+)', (req, body, p) => {
-  autenticar(req);
+  exigir(req, ADMIN_E_CAIXA);
   const pedido = pedidos.find((x) => x.id === parseId(p[1], 'pedidoId'));
   if (!pedido) throw new ApiErro(404, 'Pedido não encontrado.');
   return { corpo: pedido.pagamentos.map((pg) => ({ ...pg, pedidoId: pedido.id })) };
 });
 
 // --- estoque e movimentações ---
-// Réplica fiel do módulo do Murilo: SEM autenticação, usuarioId vem no corpo e os erros vêm como { erro }.
+// Como no backend atual: exigem token; os três perfis consultam, ajustam e registram; só o Administrador remove.
+// Quem registra a movimentação vem do token (um usuarioId no corpo é ignorado).
 const paraEstoque = (p) => ({
   id: p.id, produtoId: p.id, quantidadeFisica: p.fisica, quantidadeReservada: p.reservada, estoqueMinimo: p.minimo,
   produto: { id: p.id, nome: p.nome, codigoBarras: p.codigoBarras },
@@ -524,15 +569,20 @@ const paraMovimentacao = (m) => ({
   usuario: { id: m.usuarioId, nome: usuarios.find((x) => x.id === m.usuarioId)?.nome ?? '' },
 });
 
-rota('GET', '/estoque', () => ({ corpo: [...produtos].sort((a, b) => a.id - b.id).map(paraEstoque) }));
+rota('GET', '/estoque', (req) => {
+  exigir(req, TODOS_INTERNOS);
+  return { corpo: [...produtos].sort((a, b) => a.id - b.id).map(paraEstoque) };
+});
 
 rota('GET', '/estoque/(\\d+)', (req, body, p) => {
+  exigir(req, TODOS_INTERNOS);
   const produto = produtos.find((x) => x.id === Number(p[1]));
   if (!produto) throw new ErroSimples(404, 'Estoque não encontrado para esse produto');
   return { corpo: paraEstoque(produto) };
 });
 
 rota('PUT', '/estoque/(\\d+)', (req, body, p) => {
+  exigir(req, TODOS_INTERNOS);
   const minimo = Number(body?.estoqueMinimo);
   if (Number.isNaN(minimo) || minimo < 0) throw new ErroSimples(400, 'estoqueMinimo é obrigatório e não pode ser negativo');
   const produto = produtos.find((x) => x.id === Number(p[1]));
@@ -542,19 +592,19 @@ rota('PUT', '/estoque/(\\d+)', (req, body, p) => {
 });
 
 rota('POST', '/movimentacoes', (req, body) => {
+  const usuarioId = exigir(req, TODOS_INTERNOS).id;
   const b = body ?? {};
   const produtoId = Number(b.produtoId);
-  const usuarioId = Number(b.usuarioId);
   const quantidade = Number(b.quantidade);
   const { tipo, motivo } = b;
-  if (!produtoId || !usuarioId || !tipo || Number.isNaN(quantidade)) throw new ErroSimples(400, 'produtoId, usuarioId, tipo e quantidade são obrigatórios');
+  if (!produtoId || !tipo || Number.isNaN(quantidade)) throw new ErroSimples(400, 'produtoId, tipo e quantidade são obrigatórios');
   if (!['ENTRADA', 'SAIDA', 'PERDA', 'AJUSTE'].includes(tipo)) throw new ErroSimples(400, 'tipo inválido, use um de: ENTRADA, SAIDA, PERDA, AJUSTE');
   if (tipo === 'AJUSTE') {
     if (quantidade === 0) throw new ErroSimples(400, 'quantidade do ajuste não pode ser zero');
   } else if (quantidade <= 0) throw new ErroSimples(400, 'quantidade deve ser maior que zero');
 
   const produto = produtos.find((x) => x.id === produtoId);
-  if (!produto || !usuarios.some((u) => u.id === usuarioId)) throw new ErroSimples(500, 'Erro ao registrar movimentação'); // chave estrangeira inválida
+  if (!produto) throw new ApiErro(404, 'Produto não encontrado.', 'produtoId');
   const delta = tipo === 'SAIDA' || tipo === 'PERDA' ? -quantidade : quantidade;
   const nova = produto.fisica + delta;
   if (nova < 0) throw new ErroSimples(400, 'Estoque insuficiente para essa saída/perda');
@@ -566,12 +616,14 @@ rota('POST', '/movimentacoes', (req, body) => {
 });
 
 rota('GET', '/movimentacoes', (req, body, p, q) => {
+  exigir(req, TODOS_INTERNOS);
   const produtoId = q.get('produtoId');
   const lista = movimentacoes.filter((m) => !produtoId || m.produtoId === Number(produtoId));
   return { corpo: [...lista].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm) || b.id - a.id).map(paraMovimentacao) };
 });
 
 rota('DELETE', '/movimentacoes/(\\d+)', (req, body, p) => {
+  exigir(req, SO_ADMIN);
   const id = Number(p[1]);
   const indice = movimentacoes.findIndex((m) => m.id === id);
   if (indice === -1) throw new ErroSimples(404, 'Movimentação não encontrada');
@@ -600,12 +652,12 @@ function lerCorpo(req) {
   });
 }
 
-const enviar = (res, status, corpo) => {
+const enviar = (res, status, corpo, headers = {}) => {
   if (status === 204) {
     res.writeHead(204);
     return res.end();
   }
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(corpo));
 };
 
@@ -631,7 +683,7 @@ http
       }
       if (erro instanceof ApiErro) {
         console.log(`${req.method} ${url.pathname}${url.search} -> ${erro.status} (${erro.message})`);
-        return enviar(res, erro.status, { mensagem: erro.message, campo: erro.campo });
+        return enviar(res, erro.status, { mensagem: erro.message, campo: erro.campo }, erro.headers);
       }
       console.error(erro);
       return enviar(res, 500, { mensagem: 'Erro interno do servidor.' });
@@ -640,4 +692,5 @@ http
   .listen(PORT, () => {
     console.log(`Servidor de MENTIRA rodando em http://localhost:${PORT}`);
     console.log('Logins: admin/admin123 · caixa/123456 · atendente/123456 · paula/123456 (inativa)');
+    console.log(`Login: ${LIMITE_LOGIN} falhas por IP em ${JANELA_LOGIN_MS / 1000} s -> 429 com Retry-After.`);
   });

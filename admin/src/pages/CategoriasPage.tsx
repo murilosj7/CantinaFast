@@ -4,6 +4,7 @@ import { lerErro } from '../lib/api';
 import { useCarregar } from '../lib/useCarregar';
 import { useDebounce } from '../lib/useDebounce';
 import { categoriaService } from '../services/categoriaService';
+import { usePode } from '../auth/AuthContext';
 import type { Categoria } from '../types';
 
 type Situacao = 'todas' | 'ativa' | 'inativa';
@@ -13,6 +14,7 @@ export function CategoriasPage() {
   // A API só devolve as ativas quando não recebe status; o painel começa mostrando todas.
   const [status, setStatus] = useState<Situacao>('todas');
   const buscaAtrasada = useDebounce(busca);
+  const podeGerenciar = usePode()('categoria.gerenciar');
 
   const { dados, carregando, erro, recarregar } = useCarregar(
     () => categoriaService.listar({ busca: buscaAtrasada, status }),
@@ -54,7 +56,7 @@ export function CategoriasPage() {
       <PaginaCabecalho
         titulo="Categorias"
         descricao="Agrupam os produtos do cardápio. Uma categoria inativa deixa de aparecer no catálogo e não recebe novos produtos."
-        acao={<Button onClick={() => setEditando('nova')}>Nova categoria</Button>}
+        acao={podeGerenciar ? <Button onClick={() => setEditando('nova')}>Nova categoria</Button> : undefined}
       />
 
       <div className="space-y-4">
@@ -87,14 +89,14 @@ export function CategoriasPage() {
               <tr>
                 <th className={tabela.th}>Nome</th>
                 <th className={tabela.th}>Situação</th>
-                <th className={`${tabela.th} text-right`}>Ações</th>
+                {podeGerenciar && <th className={`${tabela.th} text-right`}>Ações</th>}
               </tr>
             </thead>
             <tbody className={carregando && dados ? 'opacity-60' : ''}>
               {!dados && carregando ? (
-                <LinhaMensagem colunas={3}>Carregando…</LinhaMensagem>
+                <LinhaMensagem colunas={podeGerenciar ? 3 : 2}>Carregando…</LinhaMensagem>
               ) : categorias.length === 0 ? (
-                <LinhaMensagem colunas={3}>Nenhuma categoria encontrada. Cadastre a primeira para começar a organizar os produtos.</LinhaMensagem>
+                <LinhaMensagem colunas={podeGerenciar ? 3 : 2}>Nenhuma categoria encontrada. Cadastre a primeira para começar a organizar os produtos.</LinhaMensagem>
               ) : (
                 categorias.map((c) => (
                   <tr key={c.id} className={tabela.linha}>
@@ -102,6 +104,7 @@ export function CategoriasPage() {
                     <td className={tabela.td}>
                       <Badge tom={c.ativa ? 'verde' : 'neutro'}>{c.ativa ? 'Ativa' : 'Inativa'}</Badge>
                     </td>
+                    {podeGerenciar && (
                     <td className={`${tabela.td} text-right`}>
                       <div className="flex justify-end gap-1">
                         <Button variante="fantasma" tamanho="sm" onClick={() => setEditando(c)}>
@@ -118,6 +121,7 @@ export function CategoriasPage() {
                         )}
                       </div>
                     </td>
+                    )}
                   </tr>
                 ))
               )}

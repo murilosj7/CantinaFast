@@ -25,14 +25,28 @@ export default function App() {
         <Route index element={<Navigate to="/pedidos" replace />} />
         <Route path="pedidos" element={<PedidosPage />} />
         <Route path="pedidos/novo" element={<NovoPedidoPage />} />
-        <Route path="pagamentos" element={<PagamentosPage />} />
+        <Route
+          path="pagamentos"
+          element={
+            <ProtectedRoute acao="pagamento.ver">
+              <PagamentosPage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="produtos" element={<ProdutosPage />} />
-        <Route path="estoque" element={<EstoquePage />} />
+        <Route
+          path="estoque"
+          element={
+            <ProtectedRoute acao="estoque.consultar">
+              <EstoquePage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="categorias" element={<CategoriasPage />} />
         <Route
           path="usuarios"
           element={
-            <ProtectedRoute perfis={['administrador']}>
+            <ProtectedRoute acao="usuario.gerenciar">
               <UsuariosPage />
             </ProtectedRoute>
           }

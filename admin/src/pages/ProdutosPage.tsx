@@ -20,6 +20,7 @@ import { useCarregar } from '../lib/useCarregar';
 import { useDebounce } from '../lib/useDebounce';
 import { categoriaService } from '../services/categoriaService';
 import { produtoService } from '../services/produtoService';
+import { usePode } from '../auth/AuthContext';
 import type { Categoria, Produto } from '../types';
 
 type Situacao = 'todos' | 'ativo' | 'inativo';
@@ -42,6 +43,8 @@ export function ProdutosPage() {
   const [categoriaId, setCategoriaId] = useState('');
   const [status, setStatus] = useState<Situacao>('todos');
   const buscaAtrasada = useDebounce(busca);
+  const podeGerenciar = usePode()('produto.gerenciar');
+  const colunas = podeGerenciar ? 7 : 6;
 
   const { dados, carregando, erro, recarregar } = useCarregar(
     () =>
@@ -92,7 +95,7 @@ export function ProdutosPage() {
       <PaginaCabecalho
         titulo="Produtos"
         descricao="O cardápio da cantina. Produtos não são excluídos, porque os pedidos antigos continuam apontando para eles."
-        acao={<Button onClick={() => setEditando('novo')}>Novo produto</Button>}
+        acao={podeGerenciar ? <Button onClick={() => setEditando('novo')}>Novo produto</Button> : undefined}
       />
 
       <div className="space-y-4">
@@ -143,14 +146,14 @@ export function ProdutosPage() {
                 <th className={`${tabela.th} text-right`}>Disponível</th>
                 <th className={tabela.th}>Vendido em</th>
                 <th className={tabela.th}>Situação</th>
-                <th className={`${tabela.th} text-right`}>Ações</th>
+                {podeGerenciar && <th className={`${tabela.th} text-right`}>Ações</th>}
               </tr>
             </thead>
             <tbody className={carregando && dados ? 'opacity-60' : ''}>
               {!dados && carregando ? (
-                <LinhaMensagem colunas={7}>Carregando…</LinhaMensagem>
+                <LinhaMensagem colunas={colunas}>Carregando…</LinhaMensagem>
               ) : produtos.length === 0 ? (
-                <LinhaMensagem colunas={7}>Nenhum produto encontrado com esses filtros.</LinhaMensagem>
+                <LinhaMensagem colunas={colunas}>Nenhum produto encontrado com esses filtros.</LinhaMensagem>
               ) : (
                 produtos.map((p) => (
                   <tr key={p.id} className={tabela.linha}>
@@ -180,6 +183,7 @@ export function ProdutosPage() {
                     <td className={tabela.td}>
                       <Badge tom={p.ativo ? 'verde' : 'neutro'}>{p.ativo ? 'Ativo' : 'Inativo'}</Badge>
                     </td>
+                    {podeGerenciar && (
                     <td className={`${tabela.td} text-right`}>
                       <div className="flex justify-end gap-1">
                         <Button variante="fantasma" tamanho="sm" onClick={() => setEditando(p)}>
@@ -196,6 +200,7 @@ export function ProdutosPage() {
                         )}
                       </div>
                     </td>
+                    )}
                   </tr>
                 ))
               )}

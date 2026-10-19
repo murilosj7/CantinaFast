@@ -1,24 +1,25 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth, usePode } from '../auth/AuthContext';
+import type { Acao } from '../auth/permissoes';
 import { PERFIL_ROTULO } from '../lib/format';
-import type { Perfil } from '../types';
 import { Button } from './ui';
 
 interface ItemMenu {
   para: string;
   rotulo: string;
-  perfis?: Perfil[];
+  // Sem `acao`, qualquer usuário logado vê o item.
+  acao?: Acao;
 }
 
 const ITENS: ItemMenu[] = [
-  { para: '/pedidos/novo', rotulo: 'Novo pedido' },
-  { para: '/pedidos', rotulo: 'Pedidos' },
-  { para: '/pagamentos', rotulo: 'Pagamentos' },
+  { para: '/pedidos/novo', rotulo: 'Novo pedido', acao: 'pedido.criar' },
+  { para: '/pedidos', rotulo: 'Pedidos', acao: 'pedido.ver' },
+  { para: '/pagamentos', rotulo: 'Pagamentos', acao: 'pagamento.ver' },
   { para: '/produtos', rotulo: 'Produtos' },
-  { para: '/estoque', rotulo: 'Estoque' },
+  { para: '/estoque', rotulo: 'Estoque', acao: 'estoque.consultar' },
   { para: '/categorias', rotulo: 'Categorias' },
-  { para: '/usuarios', rotulo: 'Usuários', perfis: ['administrador'] },
+  { para: '/usuarios', rotulo: 'Usuários', acao: 'usuario.gerenciar' },
 ];
 
 // Áreas previstas na documentação que ainda não têm página.
@@ -33,7 +34,8 @@ export function Layout() {
     setMenuAberto(false);
   }, [local.pathname]);
 
-  const visiveis = ITENS.filter((item) => !item.perfis || (usuario && item.perfis.includes(usuario.perfil)));
+  const pode = usePode();
+  const visiveis = ITENS.filter((item) => !item.acao || pode(item.acao));
 
   return (
     <div className="flex min-h-screen">

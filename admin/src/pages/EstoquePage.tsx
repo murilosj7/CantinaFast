@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { useAuth } from '../auth/AuthContext';
+import { usePode } from '../auth/AuthContext';
 import { Alerta, Badge, Button, Campo, Confirmacao, Entrada, Interruptor, LinhaMensagem, Modal, PaginaCabecalho, Selecao, tabela } from '../components/ui';
 import { lerErro } from '../lib/api';
 import { dataHora, deltaMovimentacao, TIPO_MOV_ROTULO, TIPO_MOV_TOM, type Tom } from '../lib/format';
@@ -32,7 +32,10 @@ function situacaoDe(e: Estoque): { texto: string; tom: Tom } {
 const sinal = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
 
 export function EstoquePage() {
-  const { usuario } = useAuth();
+  const pode = usePode();
+  const podeRegistrar = pode('movimentacao.registrar');
+  const podeAjustar = pode('estoque.ajustar');
+  const podeExcluir = pode('movimentacao.excluir');
 
   const [aba, setAba] = useState<Aba>('saldos');
   const [busca, setBusca] = useState('');
@@ -124,7 +127,7 @@ export function EstoquePage() {
       <PaginaCabecalho
         titulo="Estoque"
         descricao="Saldo de cada produto e o histórico de entradas, saídas, perdas e ajustes. O saldo só muda por movimentação (ou por venda)."
-        acao={<Button onClick={() => setMovimentando({ produtoId: null })}>Registrar movimentação</Button>}
+        acao={podeRegistrar ? <Button onClick={() => setMovimentando({ produtoId: null })}>Registrar movimentação</Button> : undefined}
       />
 
       <div className="space-y-4">
@@ -202,12 +205,16 @@ export function EstoquePage() {
                           </td>
                           <td className={`${tabela.td} text-right`}>
                             <div className="flex justify-end gap-1">
-                              <Button variante="fantasma" tamanho="sm" onClick={() => setMovimentando({ produtoId: e.produtoId })}>
-                                Movimentar
-                              </Button>
-                              <Button variante="fantasma" tamanho="sm" onClick={() => setEditandoMinimo(e)}>
-                                Mínimo
-                              </Button>
+                              {podeRegistrar && (
+                                <Button variante="fantasma" tamanho="sm" onClick={() => setMovimentando({ produtoId: e.produtoId })}>
+                                  Movimentar
+                                </Button>
+                              )}
+                              {podeAjustar && (
+                                <Button variante="fantasma" tamanho="sm" onClick={() => setEditandoMinimo(e)}>
+                                  Mínimo
+                                </Button>
+                              )}
                               <Button variante="fantasma" tamanho="sm" onClick={() => verHistorico(e.produtoId)}>
                                 Histórico
                               </Button>
@@ -302,9 +309,11 @@ export function EstoquePage() {
                           <td className={tabela.td}>{m.motivo ?? <span className="text-carvao/50">—</span>}</td>
                           <td className={tabela.td}>{m.usuario.nome}</td>
                           <td className={`${tabela.td} text-right`}>
-                            <Button variante="fantasma" tamanho="sm" onClick={() => setRemovendo(m)}>
-                              Remover
-                            </Button>
+                            {podeExcluir && (
+                              <Button variante="fantasma" tamanho="sm" onClick={() => setRemovendo(m)}>
+                                Remover
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -326,11 +335,10 @@ export function EstoquePage() {
       </div>
 
       <Modal aberto={movimentando !== null} titulo="Registrar movimentação" aoFechar={() => setMovimentando(null)}>
-        {movimentando !== null && usuario && (
+        {movimentando !== null && (
           <FormMovimentacao
             estoques={listaSaldos}
             produtoInicial={movimentando.produtoId}
-            usuarioId={usuario.id}
             aoSalvar={aoSalvar}
             aoCancelar={() => setMovimentando(null)}
           />
@@ -363,13 +371,11 @@ export function EstoquePage() {
 function FormMovimentacao({
   estoques,
   produtoInicial,
-  usuarioId,
   aoSalvar,
   aoCancelar,
 }: {
   estoques: Estoque[];
   produtoInicial: number | null;
-  usuarioId: number;
   aoSalvar: (mensagem: string) => void;
   aoCancelar: () => void;
 }) {
@@ -405,7 +411,6 @@ function FormMovimentacao({
     try {
       await estoqueService.registrarMovimentacao({
         produtoId: estoque.produtoId,
-        usuarioId,
         tipo,
         quantidade: valor,
         ...(motivo.trim() !== '' ? { motivo: motivo.trim() } : {}),

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { aoExpirar, tokenStorage } from '../lib/api';
 import { authService } from '../services/authService';
 import type { UsuarioInterno } from '../types';
+import { podeFazer, type Acao } from './permissoes';
 
 interface AuthContextValor {
   usuario: UsuarioInterno | null;
@@ -76,4 +77,11 @@ export function useAuth() {
   const contexto = useContext(AuthContext);
   if (!contexto) throw new Error('useAuth precisa estar dentro de <AuthProvider>.');
   return contexto;
+}
+
+// Atalho para as telas: const pode = usePode(); pode('produto.gerenciar').
+export function usePode() {
+  const { usuario } = useAuth();
+  const perfil = usuario?.perfil;
+  return useCallback((acao: Acao) => podeFazer(perfil, acao), [perfil]);
 }

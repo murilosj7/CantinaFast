@@ -13,6 +13,7 @@ import {
 import { lerErro } from '../lib/api';
 import { useCarregar } from '../lib/useCarregar';
 import { pagamentoService, STATUS_PAGAVEIS } from '../services/pagamentoService';
+import { usePode } from '../auth/AuthContext';
 import { pedidoService } from '../services/pedidoService';
 import type { FormaPagamento, Pedido } from '../types';
 
@@ -21,6 +22,9 @@ import type { FormaPagamento, Pedido } from '../types';
 export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => void }) {
   const { dados: pedido, erro, recarregar } = useCarregar(() => pedidoService.buscar(id), [id]);
   const [mensagem, setMensagem] = useState<string | null>(null);
+  const pode = usePode();
+  const podeVerPagamentos = pode('pagamento.ver');
+  const podeRegistrarPagamento = pode('pagamento.registrar');
 
   if (erro) {
     return (
@@ -43,7 +47,7 @@ export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => 
     <div className="space-y-6">
       {mensagem && <Alerta tipo="sucesso">{mensagem}</Alerta>}
 
-      {STATUS_PAGAVEIS.includes(pedido.status) && (
+      {podeRegistrarPagamento && STATUS_PAGAVEIS.includes(pedido.status) && (
         <RegistrarPagamento
           pedido={pedido}
           aoRegistrar={() => {
@@ -115,6 +119,7 @@ export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => 
         </div>
       </section>
 
+      {podeVerPagamentos && (
       <section>
         <h3 className="mb-2 text-lg font-semibold">Pagamentos</h3>
         {pagamentos.length === 0 ? (
@@ -146,6 +151,7 @@ export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => 
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }
