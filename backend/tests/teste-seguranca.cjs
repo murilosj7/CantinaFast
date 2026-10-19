@@ -404,10 +404,19 @@ L.executar(t, async () => {
       t.eq(r.headers['access-control-allow-credentials'], 'true');
       t.verdade((r.headers.vary || '').includes('Origin'));
     });
+    await t.caso('origem da lista expõe o Retry-After ao navegador (Access-Control-Expose-Headers)', async () => {
+      for (const origem of ['http://a.test:3001', 'http://b.test']) {
+        const r = await get(origem);
+        const expostos = (r.headers['access-control-expose-headers'] || '').split(',').map((h) => h.trim().toLowerCase());
+        t.verdade(expostos.includes('retry-after'), `Access-Control-Expose-Headers = ${r.headers['access-control-expose-headers']}`);
+      }
+    });
     await t.caso('origem FORA da lista → 403 { mensagem: "Origem não permitida." } sem header CORS', async () => {
       const r = await get('http://evil.test');
       L.erro({ status: r.status, body: r.body, texto: r.texto }, 403, { mensagem: 'Origem não permitida.' });
       t.eq(r.headers['access-control-allow-origin'], undefined);
+      t.eq(r.headers['access-control-expose-headers'], undefined);
+      t.eq(r.headers['access-control-allow-credentials'], undefined);
     });
     for (const [rotulo, origem] of [
       ['mesma máquina, porta diferente', 'http://a.test:3002'], ['esquema diferente (https)', 'https://a.test:3001'],

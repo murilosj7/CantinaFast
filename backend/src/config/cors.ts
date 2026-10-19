@@ -38,4 +38,6 @@ export const opcoesCors: CorsOptions = {
   },
   // Permite que o navegador envie credenciais (cookies/cabeçalho Authorization) nas chamadas entre origens.
   credentials: true,
+  // Deixa o JavaScript do navegador ler o Retry-After dos 429 (sem isso, entre origens, o cabeçalho existe mas fica invisível ao frontend).
+  exposedHeaders: ["Retry-After"],
 };
