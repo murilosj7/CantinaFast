@@ -213,6 +213,12 @@ L.executar(t, async () => {
       L.erro(await login({ login: '', senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
       L.erro(await login({ login: '   ', senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
     });
+    await t.caso('o login interno NÃO vai para minúsculas: "Xyz" e "xyz" são alvos distintos (5 erros em "Xyz" bloqueiam "Xyz", mas "xyz" segue 401)', async () => {
+      const nome = t.unico('Caso');
+      for (let i = 0; i < 5; i++) L.erro(await login({ login: nome, senha: 'x' }), 401, { mensagem: 'Login ou senha inválidos.' });
+      L.erro(await login({ login: nome, senha: 'x' }), 429, { mensagem: MSG_LOGIN_429 });
+      L.erro(await login({ login: nome.toLowerCase(), senha: 'x' }), 401, { mensagem: 'Login ou senha inválidos.' });
+    });
     await t.caso('o alvo do login interno é cortado em 120 caracteres: dois logins iguais nos 120 primeiros dividem o contador (6º → 429)', async () => {
       const base = (t.unico('longo') + 'y'.repeat(200)).slice(0, 120);
       for (let i = 0; i < 5; i++) t.verdade((await login({ login: `${base}${i}`, senha: 'x' })).status < 429);
@@ -763,7 +769,7 @@ L.executar(t, async () => {
       });
     }
     // Inválida: nunca aceita true nem listas; avisa no log e NÃO confia em nada (forjar o X-Forwarded-For não ajuda).
-    for (const valor of ['true', 'false', '0', '-1', '1.5', '1e3', '11', '100', 'abc', '1,2', '1 2', 'loopback', '127.0.0.1', '0x2', '+1', '1.0', '2.0', '1e1']) {
+    for (const valor of ['true', 'false', '0', '-1', '1.5', '1e3', '11', '100', 'abc', '1,2', '1 2', 'loopback', '127.0.0.1', '0x2', '+1', '1.0', '2.0', '1e1', '01.5']) {
       await subFase(`TRUST_PROXY=${JSON.stringify(valor)}`, { NODE_ENV: 'development', LOGIN_RATE_LIMIT_MAX: '5', CORS_ALLOWED_ORIGINS: '', TRUST_PROXY: valor }, async (s) => {
         await t.caso(`TRUST_PROXY=${JSON.stringify(valor)} é inválida: avisa no log, não confia em nada e o X-Forwarded-For é ignorado`, async () => {
           t.verdade(s.log.includes('TRUST_PROXY inválida'), s.log);
