@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alerta, Badge, Button, Selecao, tabela } from './ui';
+import { Alerta, Badge, Button, Segmentado, tabela } from './ui';
 import {
   CANAL_ROTULO,
   dataHora,
@@ -19,7 +19,8 @@ import type { FormaPagamento, Pedido } from '../types';
 
 // Detalhe de um pedido (itens, pagamentos) com o botão de registrar pagamento.
 // Usado na tela de Pedidos e na tela de Pagamentos.
-export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => void }) {
+// `pagarDireto`: já abre o formulário de pagamento (a tela de Pagamentos usa, para o Caixa economizar um toque).
+export function DetalhePedido({ id, aoAlterar, pagarDireto = false }: { id: number; aoAlterar: () => void; pagarDireto?: boolean }) {
   const { dados: pedido, erro, recarregar } = useCarregar(() => pedidoService.buscar(id), [id]);
   const [mensagem, setMensagem] = useState<string | null>(null);
   const pode = usePode();
@@ -50,6 +51,7 @@ export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => 
       {podeRegistrarPagamento && STATUS_PAGAVEIS.includes(pedido.status) && (
         <RegistrarPagamento
           pedido={pedido}
+          abertoAoIniciar={pagarDireto}
           aoRegistrar={() => {
             setMensagem(`Pagamento de ${moeda(pedido.total)} registrado. O pedido está pago.`);
             recarregar(); // atualiza o detalhe (status e lista de pagamentos)
@@ -157,8 +159,8 @@ export function DetalhePedido({ id, aoAlterar }: { id: number; aoAlterar: () => 
 }
 
 // O backend aceita um único pagamento, do valor exato do pedido, e já o marca como aprovado.
-function RegistrarPagamento({ pedido, aoRegistrar }: { pedido: Pedido; aoRegistrar: () => void }) {
-  const [aberto, setAberto] = useState(false);
+function RegistrarPagamento({ pedido, aoRegistrar, abertoAoIniciar }: { pedido: Pedido; aoRegistrar: () => void; abertoAoIniciar: boolean }) {
+  const [aberto, setAberto] = useState(abertoAoIniciar);
   const [forma, setForma] = useState<FormaPagamento>('PIX');
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -191,31 +193,28 @@ function RegistrarPagamento({ pedido, aoRegistrar }: { pedido: Pedido; aoRegistr
     <div className="space-y-4 rounded-card border border-brasa-200 bg-brasa-50 p-4">
       <h3 className="text-lg font-semibold">Registrar pagamento</h3>
       {erro && <Alerta>{erro}</Alerta>}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label htmlFor="forma-pagamento" className="mb-1 block text-sm font-medium">
-            Forma de pagamento
-          </label>
-          <Selecao id="forma-pagamento" value={forma} onChange={(e) => setForma(e.target.value as FormaPagamento)}>
-            {(Object.keys(FORMA_PAGAMENTO_ROTULO) as FormaPagamento[]).map((f) => (
-              <option key={f} value={f}>
-                {FORMA_PAGAMENTO_ROTULO[f]}
-              </option>
-            ))}
-          </Selecao>
-        </div>
-        <div>
-          <p className="mb-1 text-sm font-medium">Valor</p>
-          <p className="rounded-md border border-carvao/15 bg-white px-3 py-2 text-sm font-semibold tabular-nums">{moeda(pedido.total)}</p>
-          <p className="mt-1 text-xs text-carvao/65">Igual ao total do pedido. Não há pagamento parcial.</p>
-        </div>
+      <div>
+        <p className="mb-2 text-sm font-medium">Forma de pagamento</p>
+        <Segmentado
+          rotulo="Forma de pagamento"
+          className="grid-cols-3"
+          opcoes={(Object.keys(FORMA_PAGAMENTO_ROTULO) as FormaPagamento[]).map((f) => ({ valor: f, rotulo: FORMA_PAGAMENTO_ROTULO[f] }))}
+          valor={forma}
+          aoMudar={setForma}
+        />
       </div>
-      <div className="flex justify-end gap-2">
-        <Button variante="secundario" onClick={() => setAberto(false)} disabled={salvando}>
+      <div className="flex items-baseline justify-between gap-3 rounded-md border border-carvao/15 bg-white px-4 py-3">
+        <span className="text-sm">
+          Valor <span className="text-carvao/65">(igual ao total; não há pagamento parcial)</span>
+        </span>
+        <span className="text-2xl font-semibold tabular-nums">{moeda(pedido.total)}</span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[1fr_2fr]">
+        <Button variante="secundario" onClick={() => setAberto(false)} disabled={salvando} className="min-h-12">
           Cancelar
         </Button>
-        <Button onClick={confirmar} carregando={salvando}>
-          Confirmar pagamento
+        <Button onClick={confirmar} carregando={salvando} className="min-h-12 text-base">
+          Confirmar {moeda(pedido.total)} no {FORMA_PAGAMENTO_ROTULO[forma].toLowerCase()}
         </Button>
       </div>
     </div>

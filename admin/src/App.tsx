@@ -9,6 +9,14 @@ import { PagamentosPage } from './pages/PagamentosPage';
 import { PedidosPage } from './pages/PedidosPage';
 import { ProdutosPage } from './pages/ProdutosPage';
 import { UsuariosPage } from './pages/UsuariosPage';
+import { useAuth } from './auth/AuthContext';
+import { telaInicial } from './auth/permissoes';
+
+// Cada perfil abre direto na tela que mais usa (Atendente: Novo pedido; Caixa: Pagamentos).
+function TelaInicial() {
+  const { usuario } = useAuth();
+  return <Navigate to={telaInicial(usuario?.perfil)} replace />;
+}
 
 export default function App() {
   return (
@@ -22,7 +30,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/pedidos" replace />} />
+        <Route index element={<TelaInicial />} />
         <Route path="pedidos" element={<PedidosPage />} />
         <Route path="pedidos/novo" element={<NovoPedidoPage />} />
         <Route
