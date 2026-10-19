@@ -30,6 +30,11 @@ function lerInteiro(valor: unknown, campo: string, padrao: number, minimo: numbe
 // Paginação simples (pagina começa em 1; limite máximo 100), do pedido mais novo para o mais antigo.
 // Os filtros de status e canal são opcionais, combinam entre si e aceitam minúsculas.
 export async function listarPedidos(req: Request, res: Response) {
+  // Rota protegida: o perfil vem do banco (autenticar).
+  if (!req.usuario) {
+    throw new AppError("Não autenticado.", 401);
+  }
+  const perfil = req.usuario.perfil;
   // Os parâmetros vêm na URL (query string), depois do "?".
   const { pagina: paginaBruta, limite: limiteBruto, status, canal } = req.query;
 
@@ -79,5 +84,5 @@ export async function listarPedidos(req: Request, res: Response) {
   ]);
 
   // Responde com a página, os dados de paginação e o total de páginas.
-  res.json({ dados: pedidos.map(paraPedido), pagina, limite, total, totalPaginas: Math.ceil(total / limite) });
+  res.json({ dados: pedidos.map((pedido) => paraPedido(pedido, perfil)), pagina, limite, total, totalPaginas: Math.ceil(total / limite) });
 }

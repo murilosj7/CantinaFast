@@ -1,3 +1,5 @@
+// Perfis internos: o Atendente não vê pagamentos (o PDV Atendimento não recebe pagamento).
+import { PerfilUsuario } from "@prisma/client";
 // Tipos do Prisma usados para descrever o pedido carregado e o pagamento.
 import type { Pagamento, Prisma } from "@prisma/client";
 // Converte valores Decimal (dinheiro) em número comum para a resposta.
@@ -41,8 +43,10 @@ export function paraPagamento(pagamento: Pagamento) {
 
 // Tradução banco -> frontend (contrato-api-cantinafast.md): o total do pedido sai como `total` (número),
 // e cada item traz o nome e a imagem do produto. Os enums (canal, status) seguem como no banco.
-// Só inclui `pagamentos` quando o pedido foi carregado com eles (detalhe/criação, não na listagem).
-export function paraPedido(pedido: PedidoComItens | PedidoCompleto) {
+// Só inclui `pagamentos` quando o pedido foi carregado com eles (detalhe/criação, não na listagem) E o perfil pode vê-los:
+// o ATENDENTE nunca recebe a chave `pagamentos` (nem forma, valor ou status de pagamento); para saber se o pedido está pago
+// ele usa o `status` do próprio pedido.
+export function paraPedido(pedido: PedidoComItens | PedidoCompleto, perfil: PerfilUsuario) {
   // Parte comum a todas as respostas de pedido.
   const base = {
     id: pedido.id,
@@ -69,7 +73,7 @@ export function paraPedido(pedido: PedidoComItens | PedidoCompleto) {
   };
 
   // Pedido carregado com pagamentos: acrescenta a lista.
-  if ("pagamentos" in pedido) {
+  if ("pagamentos" in pedido && perfil !== PerfilUsuario.ATENDENTE) {
     return { ...base, pagamentos: pedido.pagamentos.map(paraPagamento) };
   }
   // Pedido de listagem: sem pagamentos.

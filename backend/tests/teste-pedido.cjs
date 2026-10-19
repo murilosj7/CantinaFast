@@ -248,6 +248,59 @@ L.executar(t, async () => {
     t.sucesso(await t.http('GET', '/pedidos', { token: cx.token }));
   });
 
+  // ---------------------------------------------------------------- pagamentos x perfil
+  // Matriz de perfis: o Atendente não vê pagamentos. NENHUMA resposta de pedido (detalhe, listagem, criação) traz a chave
+  // `pagamentos` nem dado de pagamento (forma, status do pagamento, valor pago, troco, identificador externo) para ele.
+  // Para saber se o pedido está pago o Atendente usa o `status` do próprio pedido. Caixa e Administrador continuam vendo.
+  const CHAVES_SEM_PAGAMENTOS = CHAVES_PEDIDO.filter((k) => k !== 'pagamentos');
+  const DADOS_DE_PAGAMENTO = ['pagamentos', 'pagamento', 'formaPagamento', 'statusPagamento', 'valorPago', 'troco', 'identificadorExterno'];
+  const semDadoDePagamento = (resposta) => {
+    const texto = JSON.stringify(resposta);
+    for (const chave of DADOS_DE_PAGAMENTO) t.verdade(!texto.includes(`"${chave}"`), `a resposta do atendente traz "${chave}": ${texto.slice(0, 300)}`);
+  };
+  let pago;
+  await t.caso('preparação: pedido com pagamento PIX registrado pelo Caixa (status PAGO)', async () => {
+    pago = t.sucesso(await pedir([item(pA, 2)]), 201);
+    t.sucesso(await t.http('POST', '/pagamentos', { token: cx.token, body: { pedidoId: pago.id, formaPagamento: 'PIX', valor: pago.total } }), 201);
+  });
+  await t.caso('GET /pedidos/:id: o atendente NÃO recebe pagamentos (nem dado de pagamento), mas vê o status PAGO do pedido', async () => {
+    const r = t.sucesso(await t.http('GET', `/pedidos/${pago.id}`, { token: at.token }));
+    t.eq(Object.keys(r).sort(), CHAVES_SEM_PAGAMENTOS);
+    semDadoDePagamento(r);
+    t.eq(r.status, 'PAGO');
+  });
+  for (const [nome, u] of [['caixa', cx], ['administrador', adm]]) {
+    await t.caso(`GET /pedidos/:id: ${nome} vê os pagamentos do pedido`, async () => {
+      const r = t.sucesso(await t.http('GET', `/pedidos/${pago.id}`, { token: u.token }));
+      t.eq(Object.keys(r).sort(), CHAVES_PEDIDO);
+      t.eq(r.pagamentos.length, 1);
+      t.eq([r.pagamentos[0].formaPagamento, r.pagamentos[0].valor], ['PIX', pago.total]);
+    });
+  }
+  await t.caso('GET /pedidos (listagem): o atendente não recebe dado de pagamento (e vê o pedido pago pelo status)', async () => {
+    const r = t.sucesso(await t.http('GET', '/pedidos?status=PAGO&limite=100', { token: at.token }));
+    semDadoDePagamento(r);
+    t.verdade(r.dados.some((p) => p.id === pago.id && p.status === 'PAGO'));
+  });
+  for (const [nome, u] of [['caixa', cx], ['administrador', adm]]) {
+    await t.caso(`GET /pedidos (listagem): ${nome} também não recebe pagamentos (só o detalhe os traz)`, async () => {
+      const r = t.sucesso(await t.http('GET', '/pedidos?status=PAGO&limite=100', { token: u.token }));
+      t.verdade(r.dados.every((p) => !('pagamentos' in p)));
+    });
+  }
+  await t.caso('POST /pedidos: a resposta do atendente NÃO traz a chave pagamentos; a do caixa e a do administrador trazem (lista vazia)', async () => {
+    const a = t.sucesso(await pedir([item(pA)], 'PRESENCIAL', at.token), 201);
+    t.eq(Object.keys(a).sort(), CHAVES_SEM_PAGAMENTOS);
+    semDadoDePagamento(a);
+    for (const u of [cx, adm]) {
+      const r = t.sucesso(await pedir([item(pA)], 'PRESENCIAL', u.token), 201);
+      t.eq([Object.keys(r).sort(), r.pagamentos], [CHAVES_PEDIDO, []]);
+    }
+  });
+  await t.caso('o atendente não consegue ler pagamentos por outro caminho: GET /pagamentos/pedido/:id → 403', async () => {
+    L.erro(await t.http('GET', `/pagamentos/pedido/${pago.id}`, { token: at.token }), 403);
+  });
+
   // ---------------------------------------------------------------- concorrência
   // Concorrência crítica: o updateMany condicional (estoque no WHERE) garante que a última unidade não é vendida duas vezes.
   await t.caso('A ÚLTIMA UNIDADE: 12 pedidos simultâneos de 1 unidade com estoque 1 → exatamente 1 vence', async () => {
