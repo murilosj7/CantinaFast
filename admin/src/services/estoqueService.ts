@@ -3,8 +3,6 @@ import type { Estoque, Movimentacao, TipoMovimentacao } from '../types';
 
 export interface NovaMovimentacao {
   produtoId: number;
-  // O backend recebe quem fez a movimentação no corpo (não do token).
-  usuarioId: number;
   tipo: TipoMovimentacao;
   // ENTRADA, SAIDA e PERDA: maior que zero. AJUSTE: diferente de zero (negativo diminui).
   quantidade: number;
@@ -30,7 +28,8 @@ export const estoqueService = {
     return data;
   },
 
-  // POST /movimentacoes: grava a movimentação e atualiza o saldo na mesma transação
+  // POST /movimentacoes: grava a movimentação e atualiza o saldo na mesma transação.
+  // Quem registrou vem do token (o backend ignora usuarioId no corpo).
   async registrarMovimentacao(dados: NovaMovimentacao) {
     const { data } = await api.post('/movimentacoes', dados);
     return data;

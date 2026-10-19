@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { Alerta, Button, Campo, Entrada } from '../components/ui';
-import { lerErro } from '../lib/api';
+import { lerErro, textoEspera } from '../lib/api';
 
 export function LoginPage() {
   const { usuario, entrar, aviso, limparAviso } = useAuth();
@@ -14,11 +14,34 @@ export function LoginPage() {
   const [erros, setErros] = useState<{ login?: string; senha?: string }>({});
   const [erroGeral, setErroGeral] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  // 429: o backend diz no Retry-After quantos segundos esperar; a tela conta para trás e libera o botão no fim.
+  const [esperaAte, setEsperaAte] = useState<number | null>(null);
+  const [restante, setRestante] = useState(0);
+
+  useEffect(() => {
+    if (esperaAte === null) return;
+    const atualizar = () => {
+      const segundos = Math.ceil((esperaAte - Date.now()) / 1000);
+      if (segundos <= 0) {
+        setEsperaAte(null);
+        setRestante(0);
+        setErroGeral(null);
+      } else {
+        setRestante(segundos);
+      }
+    };
+    atualizar();
+    const id = window.setInterval(atualizar, 1000);
+    return () => window.clearInterval(id);
+  }, [esperaAte]);
 
   if (usuario) return <Navigate to={destino} replace />;
 
+  const bloqueado = esperaAte !== null;
+
   async function enviar(e: FormEvent) {
     e.preventDefault();
+    if (bloqueado) return;
     limparAviso();
     setErroGeral(null);
 
@@ -34,7 +57,9 @@ export function LoginPage() {
       await entrar(login.trim(), senha);
     } catch (err) {
       // O backend usa uma mensagem única ("Login ou senha inválidos.") para não revelar qual dos dois errou.
-      setErroGeral(lerErro(err).mensagem);
+      const erro = lerErro(err);
+      if (erro.esperarSegundos !== undefined) setEsperaAte(Date.now() + erro.esperarSegundos * 1000);
+      setErroGeral(erro.mensagem);
       setEnviando(false);
     }
   }
@@ -60,7 +85,7 @@ export function LoginPage() {
           </div>
 
           {aviso && <Alerta tipo="aviso">{aviso}</Alerta>}
-          {erroGeral && <Alerta>{erroGeral}</Alerta>}
+          {bloqueado ? <Alerta>{textoEspera(restante || 1)}</Alerta> : erroGeral && <Alerta>{erroGeral}</Alerta>}
 
           <Campo rotulo="Login" id="login" erro={erros.login}>
             <Entrada
@@ -84,7 +109,7 @@ export function LoginPage() {
             />
           </Campo>
 
-          <Button type="submit" carregando={enviando} className="w-full">
+          <Button type="submit" carregando={enviando} disabled={bloqueado} className="w-full">
             Entrar
           </Button>
         </form>
