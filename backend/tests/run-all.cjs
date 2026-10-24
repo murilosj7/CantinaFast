@@ -27,6 +27,7 @@ const SUITES = [
   { nome: 'permissoes', servidor: true },
   { nome: 'seed', servidor: false },
   { nome: 'seguranca', servidor: false }, // sobe o próprio servidor em cada fase
+  { nome: 'qualidade', servidor: true, opcional: true }, // fora do npm test padrão; só roda com: npm test -- qualidade
 ];
 const TABELAS = ['usuario', 'cliente', 'categoria', 'produto', 'estoque', 'movimentacaoEstoque', 'pedido', 'itemPedido', 'pagamento'];
 
@@ -116,9 +117,9 @@ function resumir(nome, { codigo, saida }) {
 
 async function main() {
   const filtros = process.argv.slice(2);
-  const escolhidas = filtros.length ? SUITES.filter((s) => filtros.includes(s.nome)) : SUITES;
+  const escolhidas = filtros.length ? SUITES.filter((s) => filtros.includes(s.nome)) : SUITES.filter((s) => !s.opcional);
   if (filtros.length && escolhidas.length !== filtros.length) {
-    console.error(`Suíte desconhecida em: ${filtros.join(' ')}. Válidas: ${SUITES.map((s) => s.nome).join(', ')}`);
+    console.error(`Suíte desconhecida em: ${filtros.join(' ')}. Válidas: ${SUITES.map((s) => s.nome + (s.opcional ? ' (opcional)' : '')).join(', ')}`);
     return 2;
   }
 
